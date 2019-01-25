@@ -5,6 +5,7 @@
  */
 package io.debezium.connector.sqlserver;
 
+import io.debezium.relational.Table;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -114,7 +115,7 @@ public class SqlServerStreamingChangeEventSource implements StreamingChangeEvent
                         final ChangeTable[] tables = tablesSlot.get();
 
                         for (int i = 0; i < tableCount; i++) {
-                            changeTables[i] = new ChangeTablePointer(schema, tables[i], resultSets[i]);
+                            changeTables[i] = new ChangeTablePointer(tables[i], resultSets[i]);
                             changeTables[i].next();
                         }
 
@@ -249,17 +250,24 @@ public class SqlServerStreamingChangeEventSource implements StreamingChangeEvent
                 }
                 currentTable.setStopLsn(futureTable.getStartLsn());
                 tables.add(futureTable);
+
+                currentTable.setSourceTable(schema.tableFor(currentTable.getSourceTableId()));
+                futureTable.setSourceTable(connection.getTableSchemaFromTable(futureTable));
                 LOGGER.info("Multiple capture instances present for the same table: {} and {}", currentTable, futureTable);
+            } else {
+                currentTable.setSourceTable(schema.tableFor(currentTable.getSourceTableId()));
             }
             if (schema.tableFor(currentTable.getSourceTableId()) == null) {
                 LOGGER.info("Table {} is new to be monitored by capture instance {}", currentTable.getSourceTableId(), currentTable.getCaptureInstance());
                 // We need to read the source table schema - primary key information cannot be obtained from change table
+                Table tableSchema = connection.getTableSchemaFromTable(currentTable);
+                currentTable.setSourceTable(tableSchema);
                 dispatcher.dispatchSchemaChangeEvent(
                         currentTable.getSourceTableId(),
                         new SqlServerSchemaChangeEventEmitter(
                                 offsetContext,
                                 currentTable,
-                                connection.getTableSchemaFromTable(currentTable)
+                                tableSchema
                         )
                 );
             }
