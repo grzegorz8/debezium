@@ -6,23 +6,7 @@
 
 package io.debezium.connector.sqlserver;
 
-import java.sql.DatabaseMetaData;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.microsoft.sqlserver.jdbc.SQLServerDriver;
-
 import io.debezium.config.Configuration;
 import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.jdbc.JdbcConnection;
@@ -31,6 +15,25 @@ import io.debezium.relational.ColumnEditor;
 import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
 import io.debezium.util.BoundedConcurrentHashMap;
+import java.math.BigDecimal;
+import java.sql.DatabaseMetaData;
+import java.sql.Date;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Time;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import microsoft.sql.DateTimeOffset;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * {@link JdbcConnection} extension to be used with Microsoft SQL Server
@@ -60,6 +63,54 @@ public class SqlServerConnection extends JdbcConnection {
     private static final ConnectionFactory FACTORY = JdbcConnection.patternBasedFactory(URL_PATTERN,
             SQLServerDriver.class.getName(),
             SqlServerConnection.class.getClassLoader());
+
+    private static final Map<String, DefaultValueMapper> DEFAULT_VALUE_MAPPERS = new HashMap<>();
+
+    static {
+        // Exact numbers
+
+        DEFAULT_VALUE_MAPPERS.put("bigint", v -> Long.parseLong(v.substring(2, v.length() - 3)));       // Sample value: ((3147483648.))
+        DEFAULT_VALUE_MAPPERS.put("int", v -> Integer.parseInt(v.substring(2, v.length() - 2)));        // Sample value: ((2147483647))
+        DEFAULT_VALUE_MAPPERS.put("smallint", v -> Short.parseShort(v.substring(2, v.length() - 2)));   // Sample value: ((32767))
+        DEFAULT_VALUE_MAPPERS.put("tinyint", v -> Short.parseShort(v.substring(2, v.length() - 2)));    // Sample value: ((255))
+        DEFAULT_VALUE_MAPPERS.put("bit", v -> v.equals("((1))"));                                       // Either ((1)) or ((0))
+        DEFAULT_VALUE_MAPPERS.put("decimal", v -> new BigDecimal(v.substring(2, v.length() - 2)));      // Sample value: ((100.12345))
+        DEFAULT_VALUE_MAPPERS.put("numeric", v -> new BigDecimal(v.substring(2, v.length() - 2)));      // Sample value: ((100.12345))
+        DEFAULT_VALUE_MAPPERS.put("money", v -> new BigDecimal(v.substring(2, v.length() - 2)));        // Sample value: ((922337203685477.58))
+        DEFAULT_VALUE_MAPPERS.put("smallmoney", v -> new BigDecimal(v.substring(2, v.length() - 2)));   // Sample value: ((214748.3647))
+
+        // Approximate numerics
+        DEFAULT_VALUE_MAPPERS.put("float", v -> Double.parseDouble(v.substring(2, v.length() - 2)));    // Sample value: ((1.2345000000000000e+003))
+        DEFAULT_VALUE_MAPPERS.put("real", v -> Float.parseFloat(v.substring(2, v.length() - 2)));       // Sample value: ((1.2345000000000000e+003))
+
+        // Date and time
+        DEFAULT_VALUE_MAPPERS.put("date", v -> Date.valueOf(v.substring(2, v.length() - 2)));
+        DEFAULT_VALUE_MAPPERS.put("datetime", v -> Timestamp.valueOf(v.substring(2, v.length() - 2)));
+        DEFAULT_VALUE_MAPPERS.put("datetime2", v -> Timestamp.valueOf(v.substring(2, v.length() - 2)));
+        DEFAULT_VALUE_MAPPERS.put("datetimeoffset", v -> {
+            String rawValue = v.substring(2, v.length() - 2);
+            String datetime = rawValue.substring(0, rawValue.length() - 6);
+            String offset = rawValue.substring(rawValue.length() - 6);
+            int offsetSignum = offset.charAt(0) == '-' ? -1 : 1;
+            int offsetHours = Integer.parseInt(offset.substring(1, 3));
+            int offsetMinutes = Integer.parseInt(offset.substring(4, 6));
+            int minutesOffset = offsetSignum * (offsetHours * 60 + offsetMinutes);
+            return DateTimeOffset.valueOf(Timestamp.valueOf(datetime), minutesOffset);
+        });
+        DEFAULT_VALUE_MAPPERS.put("smalldatetime", v -> Timestamp.valueOf(v.substring(2, v.length() - 2)));
+        DEFAULT_VALUE_MAPPERS.put("time", v -> new Timestamp(Time.valueOf(v.substring(2, v.length() - 2)).toLocalTime().toSecondOfDay() * 1000L));
+
+        // Character strings
+        DEFAULT_VALUE_MAPPERS.put("char", v -> v.substring(2, v.length() - 2).toCharArray());
+        DEFAULT_VALUE_MAPPERS.put("text", v -> v.substring(2, v.length() - 2).toCharArray());
+        DEFAULT_VALUE_MAPPERS.put("varchar", v -> v.substring(2, v.length() - 2).toCharArray());
+
+        // Unicode character strings
+        DEFAULT_VALUE_MAPPERS.put("binary", v -> v.substring(1, v.length() - 1));
+        DEFAULT_VALUE_MAPPERS.put("image", v -> v);
+        DEFAULT_VALUE_MAPPERS.put("varbinary", v -> v);
+
+    }
 
     /**
      * actual name of the database, which could differ in casing from the database name given in the connector config.
@@ -159,6 +210,15 @@ public class SqlServerConnection extends JdbcConnection {
             LOGGER.trace("Increasing lsn from {} to {}", lsn, ret);
             return ret;
         }, "Increment LSN query must return exactly one value"));
+    }
+
+    public void getData() throws SQLException {
+        prepareQueryAndMap("SELECT * FROM testDB.dbo.testowa", statement -> {  },
+                rs -> {
+            rs.next();
+            return 1;
+        }
+        );
     }
 
     /**
@@ -290,7 +350,7 @@ public class SqlServerConnection extends JdbcConnection {
 
         List<Column> columns = new ArrayList<>();
         try (ResultSet rs = metadata.getColumns(
-                realDatabaseName,
+                "testDB",
                 changeTable.getSourceTableId().schema(),
                 changeTable.getSourceTableId().table(),
                 null)
@@ -307,6 +367,11 @@ public class SqlServerConnection extends JdbcConnection {
                 .addColumns(columns)
                 .setPrimaryKeyNames(pkColumnNames)
                 .create();
+    }
+
+    @Override
+    protected Map<String, DefaultValueMapper> getDefaultValueMappers() {
+        return DEFAULT_VALUE_MAPPERS;
     }
 
     public Table getTableSchemaFromChangeTable(ChangeTable changeTable) throws SQLException {
