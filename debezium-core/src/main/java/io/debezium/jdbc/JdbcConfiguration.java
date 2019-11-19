@@ -18,7 +18,7 @@ import io.debezium.util.Collect;
 /**
  * A specialized configuration for the Debezium driver. This defines several known {@link io.debezium.config.Field
  * fields} that are common to all JDBC configurations.
- * 
+ *
  * @author Randall Hauch
  */
 @Immutable
@@ -28,17 +28,17 @@ public interface JdbcConfiguration extends Configuration {
      * A field for the name of the database. This field has no default value.
      */
     public static final Field DATABASE = Field.create("dbname",
-                                                      "Name of the database");
+            "Name of the database");
     /**
      * A field for the user of the database. This field has no default value.
      */
     public static final Field USER = Field.create("user",
-                                                  "Name of the database user to be used when connecting to the database");
+            "Name of the database user to be used when connecting to the database");
     /**
      * A field for the password of the database. This field has no default value.
      */
     public static final Field PASSWORD = Field.create("password",
-                                                      "Password to be used when connecting to the database");
+            "Password to be used when connecting to the database");
     /**
      * A field for the hostname of the database server. This field has no default value.
      */
@@ -63,12 +63,14 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Obtain a {@link JdbcConfiguration} adapter for the given {@link Configuration}.
-     * 
+     *
      * @param config the configuration; may not be null
      * @return the ClientConfiguration; never null
      */
     public static JdbcConfiguration adapt(Configuration config) {
-        if (config instanceof JdbcConfiguration) return (JdbcConfiguration) config;
+        if (config instanceof JdbcConfiguration) {
+            return (JdbcConfiguration) config;
+        }
         return new JdbcConfiguration() {
             @Override
             public Set<String> keys() {
@@ -89,14 +91,14 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * The JDBC-specific builder used to construct and/or alter JDBC configuration instances.
-     * 
+     *
      * @see JdbcConfiguration#copy(Configuration)
      * @see JdbcConfiguration#create()
      */
     public static interface Builder extends Configuration.ConfigBuilder<JdbcConfiguration, Builder> {
         /**
          * Use the given user in the resulting configuration.
-         * 
+         *
          * @param username the name of the user
          * @return this builder object so methods can be chained together; never null
          */
@@ -106,7 +108,7 @@ public interface JdbcConfiguration extends Configuration {
 
         /**
          * Use the given password in the resulting configuration.
-         * 
+         *
          * @param password the password
          * @return this builder object so methods can be chained together; never null
          */
@@ -116,7 +118,7 @@ public interface JdbcConfiguration extends Configuration {
 
         /**
          * Use the given host in the resulting configuration.
-         * 
+         *
          * @param hostname the hostname
          * @return this builder object so methods can be chained together; never null
          */
@@ -126,7 +128,7 @@ public interface JdbcConfiguration extends Configuration {
 
         /**
          * Use the given database name in the resulting configuration.
-         * 
+         *
          * @param databaseName the name of the database
          * @return this builder object so methods can be chained together; never null
          */
@@ -136,7 +138,7 @@ public interface JdbcConfiguration extends Configuration {
 
         /**
          * Use the given port in the resulting configuration.
-         * 
+         *
          * @param port the port
          * @return this builder object so methods can be chained together; never null
          */
@@ -147,7 +149,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Create a new {@link Builder configuration builder} that starts with a copy of the supplied configuration.
-     * 
+     *
      * @param config the configuration to copy
      * @return the configuration builder
      */
@@ -172,16 +174,16 @@ public interface JdbcConfiguration extends Configuration {
                 function.accept(this);
                 return this;
             }
-            
+
             @Override
             public Builder changeString(Field field, Function<String, String> function) {
-                changeString(field,function);
+                changeString(field, function);
                 return this;
             }
-            
+
             @Override
             public Builder changeString(String key, Function<String, String> function) {
-                changeString(key,function);
+                changeString(key, function);
                 return this;
             }
 
@@ -199,7 +201,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Create a new {@link Builder configuration builder} that starts with an empty configuration.
-     * 
+     *
      * @return the configuration builder
      */
     public static Builder create() {
@@ -223,16 +225,16 @@ public interface JdbcConfiguration extends Configuration {
                 function.accept(this);
                 return this;
             }
-            
+
             @Override
             public Builder changeString(Field field, Function<String, String> function) {
-                changeString(field,function);
+                changeString(field, function);
                 return this;
             }
-            
+
             @Override
             public Builder changeString(String key, Function<String, String> function) {
-                changeString(key,function);
+                changeString(key, function);
                 return this;
             }
 
@@ -250,7 +252,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Get a predicate that determines if supplied keys are pre-defined field names.
-     * 
+     *
      * @return the predicate; never null
      */
     default Predicate<String> knownFieldNames() {
@@ -259,7 +261,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Get a view of this configuration that does not contain the {@link #knownFieldNames() known fields}.
-     * 
+     *
      * @return the filtered view of this configuration; never null
      */
     default Configuration withoutKnownFields() {
@@ -268,7 +270,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Get the hostname property from the configuration.
-     * 
+     *
      * @return the specified or default host name, or null if there is none.
      */
     default String getHostname() {
@@ -277,7 +279,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Get the port property from the configuration.
-     * 
+     *
      * @return the specified or default port number, or null if there is none.
      */
     default String getPortAsString() {
@@ -286,7 +288,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Get the port property from the configuration.
-     * 
+     *
      * @return the specified or default port number, or null if there is none.
      */
     default int getPort() {
@@ -295,7 +297,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Get the database name property from the configuration.
-     * 
+     *
      * @return the specified or default database name, or null if there is none.
      */
     default String getDatabase() {
@@ -304,7 +306,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Get the user property from the configuration.
-     * 
+     *
      * @return the specified or default username, or null if there is none.
      */
     default String getUser() {
@@ -313,7 +315,7 @@ public interface JdbcConfiguration extends Configuration {
 
     /**
      * Get the password property from the configuration.
-     * 
+     *
      * @return the specified or default password value, or null if there is none.
      */
     default String getPassword() {

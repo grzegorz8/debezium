@@ -55,35 +55,35 @@ ddlStatement
     : createDatabase | createEvent | createIndex
     | createLogfileGroup | createProcedure | createFunction
     | createServer | createTable | createTablespaceInnodb
-    | createTablespaceNdb | createTrigger | createView 
-    | alterDatabase | alterEvent | alterFunction 
-    | alterInstance | alterLogfileGroup | alterProcedure 
+    | createTablespaceNdb | createTrigger | createView
+    | alterDatabase | alterEvent | alterFunction
+    | alterInstance | alterLogfileGroup | alterProcedure
     | alterServer | alterTable | alterTablespace | alterView
-    | dropDatabase | dropEvent | dropIndex 
-    | dropLogfileGroup | dropProcedure | dropFunction 
-    | dropServer | dropTable | dropTablespace 
-    | dropTrigger | dropView 
+    | dropDatabase | dropEvent | dropIndex
+    | dropLogfileGroup | dropProcedure | dropFunction
+    | dropServer | dropTable | dropTablespace
+    | dropTrigger | dropView
     | renameTable | truncateTable
     ;
 
 dmlStatement
-    : selectStatement | insertStatement | updateStatement 
+    : selectStatement | insertStatement | updateStatement
     | deleteStatement | replaceStatement | callStatement
     | loadDataStatement | loadXmlStatement | doStatement
     | handlerStatement
     ;
 
 transactionStatement
-    : startTransaction 
+    : startTransaction
     | beginWork | commitWork | rollbackWork
-    | savepointStatement | rollbackStatement 
+    | savepointStatement | rollbackStatement
     | releaseStatement | lockTables | unlockTables
     ;
 
 replicationStatement
     : changeMaster | changeReplicationFilter | purgeBinaryLogs
     | resetMaster | resetSlave | startSlave | stopSlave
-    | startGroupReplication | stopGroupReplication 
+    | startGroupReplication | stopGroupReplication
     | xaStartTransaction | xaEndTransaction | xaPrepareStatement
     | xaCommitWork | xaRollbackWork | xaRecoverWork
     ;
@@ -95,26 +95,26 @@ preparedStatement
 // remark: NOT INCLUDED IN sqlStatement, but include in body
 //  of routine's statements
 compoundStatement
-    : blockStatement 
-    | caseStatement | ifStatement | leaveStatement 
-    | loopStatement | repeatStatement | whileStatement 
+    : blockStatement
+    | caseStatement | ifStatement | leaveStatement
+    | loopStatement | repeatStatement | whileStatement
     | iterateStatement | returnStatement | cursorStatement
     ;
 
 administrationStatement
-    : alterUser | createUser | dropUser | grantStatement 
-    | grantProxy | renameUser | revokeStatement 
-    | revokeProxy | analyzeTable | checkTable 
-    | checksumTable | optimizeTable | repairTable 
-    | createUdfunction | installPlugin | uninstallPlugin 
-    | setStatement | showStatement | binlogStatement 
-    | cacheIndexStatement | flushStatement | killStatement 
-    | loadIndexIntoCache | resetStatement 
+    : alterUser | createUser | dropUser | grantStatement
+    | grantProxy | renameUser | revokeStatement
+    | revokeProxy | analyzeTable | checkTable
+    | checksumTable | optimizeTable | repairTable
+    | createUdfunction | installPlugin | uninstallPlugin
+    | setStatement | showStatement | binlogStatement
+    | cacheIndexStatement | flushStatement | killStatement
+    | loadIndexIntoCache | resetStatement
     | shutdownStatement
     ;
 
 utilityStatement
-    : simpleDescribeStatement | fullDescribeStatement 
+    : simpleDescribeStatement | fullDescribeStatement
     | helpStatement | useStatement
     ;
 
@@ -124,7 +124,7 @@ utilityStatement
 //    Create statements
 
 createDatabase
-    : CREATE dbFormat=(DATABASE | SCHEMA) 
+    : CREATE dbFormat=(DATABASE | SCHEMA)
       ifNotExists? uid createDatabaseOption*
     ;
 
@@ -137,17 +137,17 @@ createEvent
     ;
 
 createIndex
-    : CREATE 
-      intimeAction=(ONLINE | OFFLINE)? 
-      indexCategory=(UNIQUE | FULLTEXT | SPATIAL)? 
-      INDEX uid indexType? 
+    : CREATE
+      intimeAction=(ONLINE | OFFLINE)?
+      indexCategory=(UNIQUE | FULLTEXT | SPATIAL)?
+      INDEX uid indexType?
       ON tableName indexColumnNames
-      indexOption* 
+      indexOption*
       (
-        ALGORITHM '='? algType=(DEFAULT | INPLACE | COPY) 
-        | LOCK '='? 
+        ALGORITHM '='? algType=(DEFAULT | INPLACE | COPY)
+        | LOCK '='?
           lockType=(DEFAULT | NONE | SHARED | EXCLUSIVE)
-      )?
+      )*
     ;
 
 createLogfileGroup
@@ -164,18 +164,18 @@ createLogfileGroup
 
 createProcedure
     : CREATE ownerStatement?
-    PROCEDURE fullId 
-      '(' procedureParameter? (',' procedureParameter)* ')' 
-      routineOption* 
+    PROCEDURE fullId
+      '(' procedureParameter? (',' procedureParameter)* ')'
+      routineOption*
     routineBody
     ;
 
 createFunction
     : CREATE ownerStatement?
     FUNCTION fullId
-      '(' functionParameter? (',' functionParameter)* ')' 
-      RETURNS dataType 
-      routineOption* 
+      '(' functionParameter? (',' functionParameter)* ')'
+      RETURNS dataType
+      routineOption*
     routineBody
     ;
 
@@ -186,32 +186,32 @@ createServer
     ;
 
 createTable
-    : CREATE TEMPORARY? TABLE ifNotExists? 
-       tableName 
+    : CREATE TEMPORARY? TABLE ifNotExists?
+       tableName
        (
-         LIKE tableName 
-         | '(' LIKE parenthesisTable=tableName ')' 
+         LIKE tableName
+         | '(' LIKE parenthesisTable=tableName ')'
        )                                                            #copyCreateTable
-    | CREATE TEMPORARY? TABLE ifNotExists? 
+    | CREATE TEMPORARY? TABLE ifNotExists?
        tableName createDefinitions?
        ( tableOption (','? tableOption)* )?
        partitionDefinitions? keyViolate=(IGNORE | REPLACE)?
        AS? selectStatement                                          #queryCreateTable
-    | CREATE TEMPORARY? TABLE ifNotExists? 
+    | CREATE TEMPORARY? TABLE ifNotExists?
        tableName createDefinitions
        ( tableOption (','? tableOption)* )?
        partitionDefinitions?                                        #columnCreateTable
     ;
 
 createTablespaceInnodb
-    : CREATE TABLESPACE uid 
+    : CREATE TABLESPACE uid
       ADD DATAFILE datafile=STRING_LITERAL
       (FILE_BLOCK_SIZE '=' fileBlockSize=fileSizeLiteral)?
       (ENGINE '='? engineName)?
     ;
 
 createTablespaceNdb
-    : CREATE TABLESPACE uid 
+    : CREATE TABLESPACE uid
       ADD DATAFILE datafile=STRING_LITERAL
       USE LOGFILE GROUP uid
       (EXTENT_SIZE '='? extentSize=fileSizeLiteral)?
@@ -225,8 +225,8 @@ createTablespaceNdb
     ;
 
 createTrigger
-    : CREATE ownerStatement? 
-      TRIGGER thisTrigger=fullId 
+    : CREATE ownerStatement?
+      TRIGGER thisTrigger=fullId
       triggerTime=(BEFORE | AFTER)
       triggerEvent=(INSERT | UPDATE | DELETE)
       ON tableName FOR EACH ROW
@@ -235,12 +235,12 @@ createTrigger
     ;
 
 createView
-    : CREATE (OR REPLACE)? 
+    : CREATE (OR REPLACE)?
       (
         ALGORITHM '=' algType=(UNDEFINED | MERGE | TEMPTABLE)
-      )? 
-      ownerStatement? 
-      (SQL SECURITY secContext=(DEFINER | INVOKER))? 
+      )?
+      ownerStatement?
+      (SQL SECURITY secContext=(DEFINER | INVOKER))?
       VIEW fullId ('(' uidList ')')? AS selectStatement
       (WITH checkOption=(CASCADED | LOCAL)? CHECK OPTION)?
     ;
@@ -248,7 +248,7 @@ createView
 // details
 
 createDatabaseOption
-    : DEFAULT? (CHARACTER SET | CHARSET) '='? charsetName
+    : DEFAULT? (CHARACTER SET | CHARSET) '='? (charsetName | DEFAULT)
     | DEFAULT? COLLATE '='? collationName
     ;
 
@@ -301,6 +301,8 @@ indexOption
     | indexType
     | WITH PARSER uid
     | COMMENT STRING_LITERAL
+    | INVISIBLE
+    | VISIBLE
     ;
 
 procedureParameter
@@ -349,7 +351,7 @@ columnDefinition
 columnConstraint
     : nullNotnull                                                   #nullColumnConstraint
     | DEFAULT defaultValue                                          #defaultColumnConstraint
-    | (AUTO_INCREMENT | ON UPDATE timeDefinition)                   #autoIncrementColumnConstraint
+    | (AUTO_INCREMENT | ON UPDATE currentTimestamp)                 #autoIncrementColumnConstraint
     | PRIMARY? KEY                                                  #primaryKeyColumnConstraint
     | UNIQUE KEY?                                                   #uniqueKeyColumnConstraint
     | COMMENT STRING_LITERAL                                        #commentColumnConstraint
@@ -358,6 +360,7 @@ columnConstraint
     | referenceDefinition                                           #referenceColumnConstraint
     | COLLATE collationName                                         #collateColumnConstraint
     | (GENERATED ALWAYS)? AS '(' expression ')' (VIRTUAL | STORED)? #generatedColumnConstraint
+    | SERIAL DEFAULT VALUE                                          #serialDefaultColumnConstraint
     ;
 
 tableConstraint
@@ -407,7 +410,7 @@ tableOption
     : ENGINE '='? engineName                                        #tableOptionEngine
     | AUTO_INCREMENT '='? decimalLiteral                            #tableOptionAutoIncrement
     | AVG_ROW_LENGTH '='? decimalLiteral                            #tableOptionAverage
-    | DEFAULT? (CHARACTER SET | CHARSET) '='? charsetName           #tableOptionCharset
+    | DEFAULT? (CHARACTER SET | CHARSET) '='? (charsetName|DEFAULT) #tableOptionCharset
     | (CHECKSUM | PAGE_CHECKSUM) '='? boolValue=('0' | '1')         #tableOptionChecksum
     | DEFAULT? COLLATE '='? collationName                           #tableOptionCollate
     | COMMENT '='? STRING_LITERAL                                   #tableOptionComment
@@ -491,7 +494,7 @@ partitionDefinition
     ;
 
 partitionDefinerAtom
-    : constant  | expression | MAXVALUE
+    : constant | expression | MAXVALUE
     ;
 
 partitionDefinerVector
@@ -585,7 +588,7 @@ alterView
 // details
 
 alterSpecification
-    : tableOption                                                   #alterByTableOption
+    : tableOption (','? tableOption)*                               #alterByTableOption
     | ADD COLUMN? uid columnDefinition (FIRST | AFTER uid)?         #alterByAddColumn
     | ADD COLUMN? 
         '(' 
@@ -617,6 +620,7 @@ alterSpecification
     | DROP COLUMN? uid RESTRICT?                                    #alterByDropColumn
     | DROP PRIMARY KEY                                              #alterByDropPrimaryKey
     | DROP indexFormat=(INDEX | KEY) uid                            #alterByDropIndex
+    | RENAME indexFormat=(INDEX | KEY) uid TO uid                   #alterByRenameIndex
     | DROP FOREIGN KEY uid                                          #alterByDropForeignKey
     | DISABLE KEYS                                                  #alterByDisableKeys
     | ENABLE KEYS                                                   #alterByEnableKeys
@@ -670,10 +674,9 @@ dropIndex
       uid ON tableName
       (
         ALGORITHM '='? algType=(DEFAULT | INPLACE | COPY)
-      )?
-      (
-        LOCK '='? lockType=(DEFAULT | NONE | SHARED | EXCLUSIVE)
-      )?
+        | LOCK '='?
+          lockType=(DEFAULT | NONE | SHARED | EXCLUSIVE)
+      )*
     ;
 
 dropLogfileGroup
@@ -1341,7 +1344,7 @@ blockStatement
         (declareCondition SEMI)*
         (declareCursor SEMI)*
         (declareHandler SEMI)*
-        (procedureSqlStatement)*
+        procedureSqlStatement*
       )?
       END uid?
     ;
@@ -1579,6 +1582,7 @@ privilege
     | SELECT
     | SHOW (VIEW | DATABASES)
     | SHUTDOWN | SUPER | TRIGGER | UPDATE | USAGE
+    | SESSION_VARIABLES_ADMIN
     ;
 
 privilegeLevel
@@ -1586,6 +1590,7 @@ privilegeLevel
     | '*' '.' '*'                                                   #globalPrivLevel
     | uid '.' '*'                                                   #definiteSchemaPrivLevel
     | uid '.' uid                                                   #definiteFullTablePrivLevel
+    | uid dottedId                                                  #definiteFullTablePrivLevel2
     | uid                                                           #definiteTablePrivLevel
     ;
 
@@ -1654,6 +1659,7 @@ setStatement
     | setPasswordStatement                                          #setPassword
     | setTransactionStatement                                       #setTransaction
     | setAutocommitStatement                                        #setAutocommit
+    | SET fullId ('=' | ':=') expression                            #setNewValueInsideTrigger
     ;
 
 showStatement
@@ -1885,6 +1891,7 @@ engineName
     : ARCHIVE | BLACKHOLE | CSV | FEDERATED | INNODB | MEMORY 
     | MRG_MYISAM | MYISAM | NDB | NDBCLUSTER | PERFORMANCE_SCHEMA
     | TOKUDB
+    | ID
     | STRING_LITERAL | REVERSE_QUOTE_ID
     ;
 
@@ -1969,6 +1976,7 @@ nullNotnull
 
 constant
     : stringLiteral | decimalLiteral
+    | '-' decimalLiteral
     | hexadecimalLiteral | booleanLiteral
     | REAL_LITERAL | BIT_STRING
     | NOT? nullLiteral=(NULL_LITERAL | NULL_SPEC_LITERAL)
@@ -1983,7 +1991,8 @@ dataType
        | NCHAR | NVARCHAR
       ) 
       lengthOneDimension? BINARY? 
-      ((CHARACTER SET | CHARSET) charsetName)?                                #stringDataType
+      ((CHARACTER SET | CHARSET) charsetName)?
+      (COLLATE collationName)?                                                #stringDataType
     | NATIONAL typeName=(VARCHAR | CHARACTER)
         lengthOneDimension? BINARY?                                           #nationalStringDataType
     | NCHAR typeName=VARCHAR
@@ -1994,28 +2003,32 @@ dataType
         TINYINT | SMALLINT | MEDIUMINT | INT | INTEGER | BIGINT
       ) 
       lengthOneDimension? (SIGNED | UNSIGNED)? ZEROFILL?                       #dimensionDataType
-    | typeName=(REAL | FLOAT)
+    | typeName=REAL
       lengthTwoDimension? (SIGNED | UNSIGNED)? ZEROFILL?                       #dimensionDataType
     | typeName=DOUBLE PRECISION?
       lengthTwoDimension? (SIGNED | UNSIGNED)? ZEROFILL?                       #dimensionDataType
-    | typeName=(DECIMAL | DEC | FIXED | NUMERIC)
+    | typeName=(DECIMAL | DEC | FIXED | NUMERIC | FLOAT)
       lengthTwoOptionalDimension? (SIGNED | UNSIGNED)? ZEROFILL?               #dimensionDataType
     | typeName=(
         DATE | TINYBLOB | BLOB | MEDIUMBLOB | LONGBLOB
-        | BOOL | BOOLEAN
+        | BOOL | BOOLEAN | SERIAL
       )                                                             #simpleDataType
     | typeName=(
         BIT | TIME | TIMESTAMP | DATETIME | BINARY
         | VARBINARY | YEAR
       ) 
       lengthOneDimension?                                           #dimensionDataType
-    | typeName=(ENUM | SET) 
-      '(' collectionOption (',' collectionOption)* ')' BINARY?
+    | typeName=(ENUM | SET)
+      collectionOptions BINARY?
       ((CHARACTER SET | CHARSET) charsetName)?                      #collectionDataType
     | typeName=(
         GEOMETRYCOLLECTION | GEOMCOLLECTION | LINESTRING | MULTILINESTRING
         | MULTIPOINT | MULTIPOLYGON | POINT | POLYGON | JSON | GEOMETRY
       )                                                             #spatialDataType
+    ;
+
+collectionOptions
+    : '(' collectionOption (',' collectionOption)* ')'
     ;
 
 collectionOption
@@ -2024,7 +2037,7 @@ collectionOption
 
 convertedDataType
     : typeName=(BINARY| NCHAR) lengthOneDimension?
-    | typeName=CHAR lengthOneDimension? (CHARACTER SET charsetName)?
+    | typeName=CHAR lengthOneDimension? ((CHARACTER SET | CHARSET) charsetName)?
     | typeName=(DATE | DATETIME | TIME)
     | typeName=DECIMAL lengthTwoDimension?
     | (SIGNED | UNSIGNED) INTEGER?
@@ -2083,12 +2096,15 @@ userVariables
 defaultValue
     : NULL_LITERAL
     | unaryOperator? constant
-    | timeDefinition
+    | currentTimestamp (ON UPDATE currentTimestamp)?
     ;
 
-timeDefinition
-    : (CURRENT_TIMESTAMP | NOW | LOCALTIME | LOCALTIMESTAMP)
-          ('(' functionArgs? ')')?
+currentTimestamp
+    :
+    (
+      (CURRENT_TIMESTAMP | LOCALTIME | LOCALTIMESTAMP) ('(' decimalLiteral? ')')?
+      | NOW '(' decimalLiteral? ')'
+    )
     ;
 
 expressionOrDefault
@@ -2360,22 +2376,22 @@ keywordsCanBeId
     : ACCOUNT | ACTION | AFTER | AGGREGATE | ALGORITHM | ANY
     | AT | AUTHORS | AUTOCOMMIT | AUTOEXTEND_SIZE
     | AUTO_INCREMENT | AVG_ROW_LENGTH | BEGIN | BINLOG | BIT
-    | BLOCK | BOOL | BOOLEAN | BTREE | CASCADED | CHAIN
-    | CHANNEL | CHECKSUM | PAGE_CHECKSUM | CIPHER | CLIENT | COALESCE | CODE
+    | BLOCK | BOOL | BOOLEAN | BTREE | CACHE | CASCADED | CHAIN | CHANGED
+    | CHANNEL | CHECKSUM | PAGE_CHECKSUM | CIPHER | CLIENT | CLOSE | COALESCE | CODE
     | COLUMNS | COLUMN_FORMAT | COMMENT | COMMIT | COMPACT
     | COMPLETION | COMPRESSED | COMPRESSION | CONCURRENT
     | CONNECTION | CONSISTENT | CONTAINS | CONTEXT
     | CONTRIBUTORS | COPY | CPU | DATA | DATAFILE | DEALLOCATE
-    | DEFAULT_AUTH | DEFINER | DELAY_KEY_WRITE | DIRECTORY
+    | DEFAULT_AUTH | DEFINER | DELAY_KEY_WRITE | DES_KEY_FILE | DIRECTORY
     | DISABLE | DISCARD | DISK | DO | DUMPFILE | DUPLICATE
-    | DYNAMIC | ENABLE | ENCRYPTION | ENDS | ENGINE | ENGINES 
+    | DYNAMIC | ENABLE | ENCRYPTION | END | ENDS | ENGINE | ENGINES
     | ERROR | ERRORS | ESCAPE | EVEN | EVENT | EVENTS | EVERY
-    | EXCHANGE | EXCLUSIVE | EXPIRE | EXTENT_SIZE | FAULTS
-    | FIELDS | FILE_BLOCK_SIZE | FILTER | FIRST | FIXED
-    | FOLLOWS | FULL | FUNCTION | GLOBAL | GRANTS
-    | GROUP_REPLICATION | HASH | HOST | IDENTIFIED
+    | EXCHANGE | EXCLUSIVE | EXPIRE | EXPORT | EXTENDED | EXTENT_SIZE | FAST | FAULTS
+    | FIELDS | FILE_BLOCK_SIZE | FILTER | FIRST | FIXED | FLUSH
+    | FOLLOWS | FOUND | FULL | FUNCTION | GENERAL | GLOBAL | GRANTS
+    | GROUP_REPLICATION | HANDLER | HASH | HELP | HOST | HOSTS | IDENTIFIED
     | IGNORE_SERVER_IDS | IMPORT | INDEXES | INITIAL_SIZE
-    | INPLACE | INSERT_METHOD | INSTANCE | INVOKER | IO
+    | INPLACE | INSERT_METHOD | INSTALL | INSTANCE | INTERNAL | INVOKER | IO
     | IO_THREAD | IPC | ISOLATION | ISSUER | JSON | KEY_BLOCK_SIZE
     | LANGUAGE | LAST | LEAVES | LESS | LEVEL | LIST | LOCAL
     | LOGFILE | LOGS | MASTER | MASTER_AUTO_POSITION
@@ -2388,33 +2404,33 @@ keywordsCanBeId
     | MASTER_TLS_VERSION | MASTER_USER
     | MAX_CONNECTIONS_PER_HOUR | MAX_QUERIES_PER_HOUR
     | MAX_ROWS | MAX_SIZE | MAX_UPDATES_PER_HOUR
-    | MAX_USER_CONNECTIONS | MEMORY | MERGE | MID | MIGRATE
-    | MIN_ROWS | MODIFY | MUTEX | MYSQL | NAME | NAMES
-    | NCHAR | NEVER | NO | NODEGROUP | NONE | OFFLINE | OFFSET
-    | OJ | OLD_PASSWORD | ONE | ONLINE | ONLY | OPTIMIZER_COSTS
+    | MAX_USER_CONNECTIONS | MEDIUM | MEMORY | MERGE | MID | MIGRATE
+    | MIN_ROWS | MODE | MODIFY | MUTEX | MYSQL | NAME | NAMES
+    | NCHAR | NEVER | NEXT | NO | NODEGROUP | NONE | OFFLINE | OFFSET
+    | OJ | OLD_PASSWORD | ONE | ONLINE | ONLY | OPEN | OPTIMIZER_COSTS
     | OPTIONS | OWNER | PACK_KEYS | PAGE | PARSER | PARTIAL
     | PARTITIONING | PARTITIONS | PASSWORD | PHASE | PLUGINS
     | PLUGIN_DIR | PLUGIN | PORT | PRECEDES | PREPARE | PRESERVE | PREV
     | PROCESSLIST | PROFILE | PROFILES | PROXY | QUERY | QUICK
     | REBUILD | RECOVER | REDO_BUFFER_SIZE | REDUNDANT
-    | RELAYLOG | RELAY_LOG_FILE | RELAY_LOG_POS | REMOVE
+    | RELAY | RELAYLOG | RELAY_LOG_FILE | RELAY_LOG_POS | REMOVE
     | REORGANIZE | REPAIR | REPLICATE_DO_DB | REPLICATE_DO_TABLE
     | REPLICATE_IGNORE_DB | REPLICATE_IGNORE_TABLE
     | REPLICATE_REWRITE_DB | REPLICATE_WILD_DO_TABLE
-    | REPLICATE_WILD_IGNORE_TABLE | REPLICATION | RESUME
+    | REPLICATE_WILD_IGNORE_TABLE | REPLICATION | RESET | RESUME
     | RETURNS | ROLLBACK | ROLLUP | ROTATE | ROW | ROWS
-    | ROW_FORMAT | SAVEPOINT | SCHEDULE | SECURITY | SERVER
+    | ROW_FORMAT | SAVEPOINT | SCHEDULE | SECURITY | SERIAL | SERVER
     | SESSION | SHARE | SHARED | SIGNED | SIMPLE | SLAVE
-    | SNAPSHOT | SOCKET | SOME | SOUNDS | SOURCE
+    | SLOW | SNAPSHOT | SOCKET | SOME | SONAME | SOUNDS | SOURCE
     | SQL_AFTER_GTIDS | SQL_AFTER_MTS_GAPS | SQL_BEFORE_GTIDS
     | SQL_BUFFER_RESULT | SQL_CACHE | SQL_NO_CACHE | SQL_THREAD
     | START | STARTS | STATS_AUTO_RECALC | STATS_PERSISTENT
     | STATS_SAMPLE_PAGES | STATUS | STOP | STORAGE | STRING
     | SUBJECT | SUBPARTITION | SUBPARTITIONS | SUSPEND | SWAPS
-    | SWITCHES | TABLESPACE | TEMPORARY | TEMPTABLE | THAN
-    | TRANSACTION | TRUNCATE | UNDEFINED | UNDOFILE
-    | UNDO_BUFFER_SIZE | UNKNOWN | UPGRADE | USER | VALIDATION
-    | VALUE | VARIABLES | VIEW | WAIT | WARNINGS | WITHOUT
+    | SWITCHES | TABLESPACE | TEMPORARY | TEMPTABLE | THAN | TRADITIONAL
+    | TRANSACTION | TRIGGERS | TRUNCATE | UNDEFINED | UNDOFILE
+    | UNDO_BUFFER_SIZE | UNINSTALL | UNKNOWN | UNTIL | UPGRADE | USER | USE_FRM | USER_RESOURCES
+    | VALIDATION | VALUE | VARIABLES | VIEW | WAIT | WARNINGS | WITHOUT
     | WORK | WRAPPER | X509 | XA | XML
     ;
 
@@ -2443,7 +2459,8 @@ functionNameBase
     | GEOMFROMWKB | GET_FORMAT | GET_LOCK | GLENGTH | GREATEST 
     | GTID_SUBSET | GTID_SUBTRACT | HEX | HOUR | IFNULL 
     | INET6_ATON | INET6_NTOA | INET_ATON | INET_NTOA | INSTR 
-    | INTERIORRINGN | INTERSECTS | ISCLOSED | ISEMPTY | ISNULL 
+    | INTERIORRINGN | INTERSECTS | INVISIBLE
+    | ISCLOSED | ISEMPTY | ISNULL
     | ISSIMPLE | IS_FREE_LOCK | IS_IPV4 | IS_IPV4_COMPAT 
     | IS_IPV4_MAPPED | IS_IPV6 | IS_USED_LOCK | LAST_INSERT_ID 
     | LCASE | LEAST | LEFT | LENGTH | LINEFROMTEXT | LINEFROMWKB
@@ -2465,7 +2482,8 @@ functionNameBase
     | POSITION| POW | POWER | QUARTER | QUOTE | RADIANS | RAND 
     | RANDOM_BYTES | RELEASE_LOCK | REVERSE | RIGHT | ROUND 
     | ROW_COUNT | RPAD | RTRIM | SECOND | SEC_TO_TIME 
-    | SESSION_USER | SHA | SHA1 | SHA2 | SIGN | SIN | SLEEP 
+    | SESSION_USER | SESSION_VARIABLES_ADMIN
+    | SHA | SHA1 | SHA2 | SIGN | SIN | SLEEP 
     | SOUNDEX | SQL_THREAD_WAIT_AFTER_GTIDS | SQRT | SRID 
     | STARTPOINT | STRCMP | STR_TO_DATE | ST_AREA | ST_ASBINARY 
     | ST_ASTEXT | ST_ASWKB | ST_ASWKT | ST_BUFFER | ST_CENTROID 
@@ -2492,7 +2510,7 @@ functionNameBase
     | TOUCHES | TO_BASE64 | TO_DAYS | TO_SECONDS | UCASE 
     | UNCOMPRESS | UNCOMPRESSED_LENGTH | UNHEX | UNIX_TIMESTAMP
     | UPDATEXML | UPPER | UUID | UUID_SHORT 
-    | VALIDATE_PASSWORD_STRENGTH | VERSION 
+    | VALIDATE_PASSWORD_STRENGTH | VERSION | VISIBLE
     | WAIT_UNTIL_SQL_THREAD_AFTER_GTIDS | WEEK | WEEKDAY 
     | WEEKOFYEAR | WEIGHT_STRING | WITHIN | YEAR | YEARWEEK 
     | Y_FUNCTION | X_FUNCTION

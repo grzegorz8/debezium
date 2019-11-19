@@ -5,11 +5,11 @@
  */
 package io.debezium.relational.mapping;
 
+import static org.fest.assertions.Assertions.assertThat;
+
 import java.sql.Types;
 
 import org.junit.Test;
-
-import static org.fest.assertions.Assertions.assertThat;
 
 import io.debezium.relational.Column;
 import io.debezium.relational.ValueConverter;
@@ -22,7 +22,7 @@ public class MaskStringsTest {
 
     private final Column column = Column.editor().name("col").jdbcType(Types.VARCHAR).create();
     private ValueConverter converter;
-    
+
     @Test
     public void shouldTruncateStrings() {
         String maskValue = "*****";

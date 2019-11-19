@@ -11,11 +11,13 @@ import static org.junit.Assert.fail;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.util.Set;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import io.debezium.config.Configuration;
 import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
 import io.debezium.relational.TableSchema;
@@ -42,7 +44,9 @@ public class MySqlSchemaTest {
         Testing.Files.delete(TEST_FILE_PATH);
         build = new Configurator();
         mysql = null;
-        source = new SourceInfo();
+        source = new SourceInfo(new MySqlConnectorConfig(Configuration.create()
+                .with(MySqlConnectorConfig.SERVER_NAME, "server")
+                .build()));
     }
 
     @After
@@ -50,7 +54,8 @@ public class MySqlSchemaTest {
         if (mysql != null) {
             try {
                 mysql.shutdown();
-            } finally {
+            }
+            finally {
                 mysql = null;
             }
         }
@@ -88,7 +93,7 @@ public class MySqlSchemaTest {
         // Testing.Print.enable();
 
         // Set up the server ...
-        source.setBinlogStartPoint("binlog-001",400);
+        source.setBinlogStartPoint("binlog-001", 400);
         mysql.applyDdl(source, "db1", "SET " + MySqlSystemVariables.CHARSET_NAME_SERVER + "=utf8mb4", this::printStatements);
         mysql.applyDdl(source, "db1", "xxxCREATE TABLE mytable\n" + readFile("ddl/mysql-products.ddl"), this::printStatements);
         mysql.applyDdl(source, "db1", readFile("ddl/mysql-products.ddl"), this::printStatements);
@@ -112,7 +117,7 @@ public class MySqlSchemaTest {
         // Testing.Print.enable();
 
         // Set up the server ...
-        source.setBinlogStartPoint("binlog-001",400);
+        source.setBinlogStartPoint("binlog-001", 400);
         mysql.applyDdl(source, "db1", "SET " + MySqlSystemVariables.CHARSET_NAME_SERVER + "=utf8mb4", this::printStatements);
         mysql.applyDdl(source, "db1", "xxxCREATE TABLE mytable\n" + readFile("ddl/mysql-products.ddl"), this::printStatements);
     }
@@ -121,16 +126,16 @@ public class MySqlSchemaTest {
     public void shouldLoadSystemAndNonSystemTablesAndConsumeOnlyFilteredDatabases() throws InterruptedException {
         mysql = build.storeDatabaseHistoryInFile(TEST_FILE_PATH)
                 .serverName(SERVER_NAME)
-                     .includeDatabases("connector_test")
-                     .excludeBuiltInTables()
-                     .createSchemas();
+                .includeDatabases("connector_test")
+                .excludeBuiltInTables()
+                .createSchemas();
         mysql.start();
 
-        source.setBinlogStartPoint("binlog-001",400);
+        source.setBinlogStartPoint("binlog-001", 400);
         mysql.applyDdl(source, "mysql", "SET " + MySqlSystemVariables.CHARSET_NAME_SERVER + "=utf8mb4", this::printStatements);
         mysql.applyDdl(source, "mysql", readFile("ddl/mysql-test-init-5.7.ddl"), this::printStatements);
 
-        source.setBinlogStartPoint("binlog-001",1000);
+        source.setBinlogStartPoint("binlog-001", 1000);
         mysql.applyDdl(source, "db1", readFile("ddl/mysql-products.ddl"), this::printStatements);
 
         // Check that we have tables ...
@@ -146,17 +151,17 @@ public class MySqlSchemaTest {
     @Test
     public void shouldLoadSystemAndNonSystemTablesAndConsumeAllDatabases() throws InterruptedException {
         mysql = build.storeDatabaseHistoryInFile(TEST_FILE_PATH)
-                     .serverName(SERVER_NAME)
-                     .includeDatabases("connector_test,mysql")
-                     .includeBuiltInTables()
-                     .createSchemas();
+                .serverName(SERVER_NAME)
+                .includeDatabases("connector_test,mysql")
+                .includeBuiltInTables()
+                .createSchemas();
         mysql.start();
 
-        source.setBinlogStartPoint("binlog-001",400);
+        source.setBinlogStartPoint("binlog-001", 400);
         mysql.applyDdl(source, "mysql", "SET " + MySqlSystemVariables.CHARSET_NAME_SERVER + "=utf8mb4", this::printStatements);
         mysql.applyDdl(source, "mysql", readFile("ddl/mysql-test-init-5.7.ddl"), this::printStatements);
 
-        source.setBinlogStartPoint("binlog-001",1000);
+        source.setBinlogStartPoint("binlog-001", 1000);
         mysql.applyDdl(source, "db1", readFile("ddl/mysql-products.ddl"), this::printStatements);
 
         // Check that we have tables ...
@@ -183,10 +188,11 @@ public class MySqlSchemaTest {
     }
 
     protected void assertNoTablesExistForDatabase(String dbName) {
-        assertThat(mysql.tableIds().stream().filter(id->id.catalog().equals(dbName)).count()).isEqualTo(0);
+        assertThat(mysql.tableIds().stream().filter(id -> id.catalog().equals(dbName)).count()).isEqualTo(0);
     }
+
     protected void assertTablesExistForDatabase(String dbName) {
-        assertThat(mysql.tableIds().stream().filter(id->id.catalog().equals(dbName)).count()).isGreaterThan(0);
+        assertThat(mysql.tableIds().stream().filter(id -> id.catalog().equals(dbName)).count()).isGreaterThan(0);
     }
 
     protected void assertHistoryRecorded() {
@@ -216,15 +222,16 @@ public class MySqlSchemaTest {
         }
     }
 
-    protected void printStatements(String dbName, String ddlStatements) {
-        Testing.print("Running DDL for '" + dbName + "': " + ddlStatements);
+    protected void printStatements(String dbName, Set<TableId> tables, String ddlStatements) {
+        Testing.print("Running DDL for '" + dbName + "': " + ddlStatements + " changing tables '" + tables + "'");
     }
 
     protected String readFile(String classpathResource) {
         try (InputStream stream = getClass().getClassLoader().getResourceAsStream(classpathResource);) {
             assertThat(stream).isNotNull();
             return IoUtil.read(stream);
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             fail("Unable to read '" + classpathResource + "'");
         }
         assert false : "should never get here";

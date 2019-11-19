@@ -14,9 +14,9 @@ import java.util.stream.Collectors;
 
 import io.debezium.annotation.Immutable;
 import io.debezium.config.Configuration;
-import io.debezium.relational.ColumnId;
 import io.debezium.relational.Selectors;
 import io.debezium.relational.TableId;
+import io.debezium.relational.Tables.ColumnNameFilter;
 import io.debezium.util.Collect;
 
 /**
@@ -27,13 +27,16 @@ import io.debezium.util.Collect;
 @Immutable
 public class Filters {
 
-    protected static final Set<String> BUILT_IN_DB_NAMES = Collect.unmodifiableSet("mysql", "performance_schema","sys", "information_schema");
+    protected static final Set<String> BUILT_IN_DB_NAMES = Collect.unmodifiableSet("mysql", "performance_schema", "sys", "information_schema");
 
     protected static boolean isBuiltInDatabase(String databaseName) {
+        if (databaseName == null) {
+            return false;
+        }
         return BUILT_IN_DB_NAMES.contains(databaseName.toLowerCase());
     }
 
-    protected static boolean isBuiltInTable(TableId id ) {
+    protected static boolean isBuiltInTable(TableId id) {
         return isBuiltInDatabase(id.catalog());
     }
 
@@ -41,7 +44,7 @@ public class Filters {
         return !isBuiltInDatabase(databaseName);
     }
 
-    protected static boolean isNotBuiltInTable(TableId id ) {
+    protected static boolean isNotBuiltInTable(TableId id) {
         return !isBuiltInTable(id);
     }
 
@@ -57,13 +60,13 @@ public class Filters {
     private final Predicate<TableId> tableFilter;
     private final Predicate<String> isBuiltInDb;
     private final Predicate<TableId> isBuiltInTable;
-    private final Predicate<ColumnId> columnFilter;
+    private final ColumnNameFilter columnFilter;
 
     private Filters(Predicate<String> dbFilter,
                     Predicate<TableId> tableFilter,
                     Predicate<String> isBuiltInDb,
                     Predicate<TableId> isBuiltInTable,
-                    Predicate<ColumnId> columnFilter) {
+                    ColumnNameFilter columnFilter) {
         this.dbFilter = dbFilter;
         this.tableFilter = tableFilter;
         this.isBuiltInDb = isBuiltInDb;
@@ -87,7 +90,7 @@ public class Filters {
         return isBuiltInDb;
     }
 
-    public Predicate<ColumnId> columnFilter() {
+    public ColumnNameFilter columnFilter() {
         return columnFilter;
     }
 
@@ -97,7 +100,7 @@ public class Filters {
         private Predicate<TableId> tableFilter;
         private Predicate<String> isBuiltInDb = Filters::isBuiltInDatabase;
         private Predicate<TableId> isBuiltInTable = Filters::isBuiltInTable;
-        private Predicate<ColumnId> columnFilter;
+        private ColumnNameFilter columnFilter;
         private final Configuration config;
 
         /**
@@ -108,12 +111,12 @@ public class Filters {
         public Builder(Configuration config) {
             this.config = config;
             setFiltersFromStrings(config.getString(MySqlConnectorConfig.DATABASE_WHITELIST),
-                                  config.getString(MySqlConnectorConfig.DATABASE_BLACKLIST),
-                                  config.getString(MySqlConnectorConfig.TABLE_WHITELIST),
-                                  config.getString(MySqlConnectorConfig.TABLE_BLACKLIST));
+                    config.getString(MySqlConnectorConfig.DATABASE_BLACKLIST),
+                    config.getString(MySqlConnectorConfig.TABLE_WHITELIST),
+                    config.getString(MySqlConnectorConfig.TABLE_BLACKLIST));
 
             // Define the filter that excludes blacklisted columns, truncated columns, and masked columns ...
-            this.columnFilter = Selectors.excludeColumns(config.getString(MySqlConnectorConfig.COLUMN_BLACKLIST));
+            this.columnFilter = ColumnNameFilter.getInstance(config.getString(MySqlConnectorConfig.COLUMN_BLACKLIST));
         }
 
         /**
@@ -123,10 +126,8 @@ public class Filters {
          * @return this
          */
         public Builder setFiltersFromOffsets(Map<String, ?> offsets) {
-            setFiltersFromStrings((String)offsets.get(SourceInfo.DATABASE_WHITELIST_KEY),
-                                  (String)offsets.get(SourceInfo.DATABASE_BLACKLIST_KEY),
-                                  (String)offsets.get(SourceInfo.TABLE_WHITELIST_KEY),
-                                  (String)offsets.get(SourceInfo.TABLE_BLACKLIST_KEY));
+            setFiltersFromStrings((String) offsets.get(SourceInfo.DATABASE_WHITELIST_KEY), (String) offsets.get(SourceInfo.DATABASE_BLACKLIST_KEY),
+                    (String) offsets.get(SourceInfo.TABLE_WHITELIST_KEY), (String) offsets.get(SourceInfo.TABLE_BLACKLIST_KEY));
             return this;
         }
 
@@ -135,23 +136,24 @@ public class Filters {
                                            String tableWhitelist,
                                            String tableBlacklist) {
             Predicate<String> dbFilter = Selectors.databaseSelector()
-                .includeDatabases(dbWhitelist)
-                .excludeDatabases(dbBlacklist)
-                .build();
+                    .includeDatabases(dbWhitelist)
+                    .excludeDatabases(dbBlacklist)
+                    .build();
 
             // Define the filter using the whitelists and blacklists for tables and database names ...
             Predicate<TableId> tableFilter = Selectors.tableSelector()
-                .includeDatabases(dbWhitelist)
-                .excludeDatabases(dbBlacklist)
-                .includeTables(tableWhitelist)
-                .excludeTables(tableBlacklist)
-                .build();
+                    .includeDatabases(dbWhitelist)
+                    .excludeDatabases(dbBlacklist)
+                    .includeTables(tableWhitelist)
+                    .excludeTables(tableBlacklist)
+                    .build();
 
             // Ignore built-in databases and tables ...
             if (config.getBoolean(MySqlConnectorConfig.TABLES_IGNORE_BUILTIN)) {
                 this.tableFilter = tableFilter.and(isBuiltInTable.negate());
                 this.dbFilter = dbFilter.and(isBuiltInDb.negate());
-            } else {
+            }
+            else {
                 this.tableFilter = tableFilter;
                 this.dbFilter = dbFilter;
             }
@@ -231,10 +233,10 @@ public class Filters {
          */
         public Filters build() {
             return new Filters(this.dbFilter,
-                               this.tableFilter,
-                               this.isBuiltInDb,
-                               this.isBuiltInTable,
-                               this.columnFilter);
+                    this.tableFilter,
+                    this.isBuiltInDb,
+                    this.isBuiltInTable,
+                    this.columnFilter);
         }
     }
 }

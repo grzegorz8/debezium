@@ -12,6 +12,7 @@ import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Lists;
 import org.apache.kafka.connect.data.Schema;
@@ -26,10 +27,12 @@ import org.junit.Test;
 import io.debezium.config.Configuration;
 import io.debezium.connector.sqlserver.SqlServerConnectorConfig.SnapshotMode;
 import io.debezium.connector.sqlserver.util.TestHelper;
+import io.debezium.data.Envelope;
 import io.debezium.data.SchemaAndValueField;
 import io.debezium.data.SourceRecordAssert;
 import io.debezium.doc.FixFor;
 import io.debezium.embedded.AbstractConnectorTest;
+import io.debezium.junit.logging.LogInterceptor;
 import io.debezium.util.Testing;
 
 /**
@@ -48,14 +51,13 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         connection.execute(
                 "CREATE TABLE tablea (id int primary key, cola varchar(30))",
                 "CREATE TABLE tableb (id int primary key, colb varchar(30))",
-                "INSERT INTO tablea VALUES(1, 'a')"
-        );
+                "INSERT INTO tablea VALUES(1, 'a')");
         TestHelper.enableTableCdc(connection, "tablea");
         TestHelper.enableTableCdc(connection, "tableb");
 
         initializeConnectorTestFramework();
         Testing.Files.delete(TestHelper.DB_HISTORY_PATH);
-        Testing.Print.enable();
+        // Testing.Print.enable();
     }
 
     @After
@@ -83,11 +85,9 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         for (int i = 0; i < RECORDS_PER_TABLE; i++) {
             final int id = ID_START + i;
             connection.execute(
-                    "INSERT INTO tablea VALUES(" + id + ", 'a')"
-            );
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
             connection.execute(
-                    "INSERT INTO tableb VALUES(" + id + ", 'b')"
-            );
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
         }
 
         final SourceRecords records = consumeRecordsByTopic(RECORDS_PER_TABLE * TABLES);
@@ -105,14 +105,14 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
                     new SchemaAndValueField("id", Schema.INT32_SCHEMA, i + ID_START),
                     new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
 
-            final Struct keyA = (Struct)recordA.key();
-            final Struct valueA = (Struct)recordA.value();
-            assertRecord((Struct)valueA.get("after"), expectedRowA);
+            final Struct keyA = (Struct) recordA.key();
+            final Struct valueA = (Struct) recordA.value();
+            assertRecord((Struct) valueA.get("after"), expectedRowA);
             assertNull(valueA.get("before"));
 
-            final Struct keyB = (Struct)recordB.key();
-            final Struct valueB = (Struct)recordB.value();
-            assertRecord((Struct)valueB.get("after"), expectedRowB);
+            final Struct keyB = (Struct) recordB.key();
+            final Struct valueB = (Struct) recordB.value();
+            assertRecord((Struct) valueB.get("after"), expectedRowB);
             assertNull(valueB.get("before"));
         }
 
@@ -130,14 +130,62 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
                     new SchemaAndValueField("id", Schema.INT32_SCHEMA, i + ID_START),
                     new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
 
-            final Struct deleteKey = (Struct)deleteRecord.key();
-            final Struct deleteValue = (Struct)deleteRecord.value();
-            assertRecord((Struct)deleteValue.get("before"), expectedDeleteRow);
+            final Struct deleteKey = (Struct) deleteRecord.key();
+            final Struct deleteValue = (Struct) deleteRecord.value();
+            assertRecord((Struct) deleteValue.get("before"), expectedDeleteRow);
             assertNull(deleteValue.get("after"));
 
-            final Struct tombstoneKey = (Struct)tombstoneRecord.key();
-            final Struct tombstoneValue = (Struct)tombstoneRecord.value();
+            final Struct tombstoneKey = (Struct) tombstoneRecord.key();
+            final Struct tombstoneValue = (Struct) tombstoneRecord.value();
             assertNull(tombstoneValue);
+        }
+
+        stopConnector();
+    }
+
+    @Test
+    public void deleteWithoutTombstone() throws Exception {
+        final int RECORDS_PER_TABLE = 5;
+        final int TABLES = 2;
+        final int ID_START = 10;
+        final Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .with(SqlServerConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .build();
+
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+
+        // Wait for snapshot completion
+        consumeRecordsByTopic(1);
+
+        for (int i = 0; i < RECORDS_PER_TABLE; i++) {
+            final int id = ID_START + i;
+            connection.execute(
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
+            connection.execute(
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
+        }
+
+        final SourceRecords records = consumeRecordsByTopic(RECORDS_PER_TABLE * TABLES);
+
+        connection.execute("DELETE FROM tableB");
+        final SourceRecords deleteRecords = consumeRecordsByTopic(RECORDS_PER_TABLE);
+        final List<SourceRecord> deleteTableA = deleteRecords.recordsForTopic("server1.dbo.tablea");
+        final List<SourceRecord> deleteTableB = deleteRecords.recordsForTopic("server1.dbo.tableb");
+        Assertions.assertThat(deleteTableA).isNullOrEmpty();
+        Assertions.assertThat(deleteTableB).hasSize(RECORDS_PER_TABLE);
+
+        for (int i = 0; i < RECORDS_PER_TABLE; i++) {
+            final SourceRecord deleteRecord = deleteTableB.get(i);
+            final List<SchemaAndValueField> expectedDeleteRow = Arrays.asList(
+                    new SchemaAndValueField("id", Schema.INT32_SCHEMA, i + ID_START),
+                    new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
+
+            final Struct deleteKey = (Struct) deleteRecord.key();
+            final Struct deleteValue = (Struct) deleteRecord.value();
+            assertRecord((Struct) deleteValue.get("before"), expectedDeleteRow);
+            assertNull(deleteValue.get("after"));
         }
 
         stopConnector();
@@ -154,6 +202,7 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         start(SqlServerConnector.class, config);
         assertConnectorIsRunning();
 
+        // Testing.Print.enable();
         // Wait for snapshot completion
         consumeRecordsByTopic(1);
 
@@ -177,9 +226,9 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
                     new SchemaAndValueField("id", Schema.INT32_SCHEMA, i + ID_START),
                     new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
 
-            final Struct keyB = (Struct)recordB.key();
-            final Struct valueB = (Struct)recordB.value();
-            assertRecord((Struct)valueB.get("after"), expectedRowB);
+            final Struct keyB = (Struct) recordB.key();
+            final Struct valueB = (Struct) recordB.value();
+            assertRecord((Struct) valueB.get("after"), expectedRowB);
             assertNull(valueB.get("before"));
         }
 
@@ -192,11 +241,216 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
                     new SchemaAndValueField("id", Schema.INT32_SCHEMA, i + ID_START),
                     new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "z"));
 
-            final Struct keyB = (Struct)recordB.key();
-            final Struct valueB = (Struct)recordB.value();
-            assertRecord((Struct)valueB.get("before"), expectedBefore);
-            assertRecord((Struct)valueB.get("after"), expectedAfter);
+            final Struct keyB = (Struct) recordB.key();
+            final Struct valueB = (Struct) recordB.value();
+            assertRecord((Struct) valueB.get("before"), expectedBefore);
+            assertRecord((Struct) valueB.get("after"), expectedAfter);
         }
+
+        stopConnector();
+    }
+
+    @Test
+    public void updatePrimaryKey() throws Exception {
+
+        final Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .build();
+
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+
+        // Testing.Print.enable();
+        // Wait for snapshot completion
+        consumeRecordsByTopic(1);
+
+        connection.execute("INSERT INTO tableb VALUES(1, 'b')");
+        consumeRecordsByTopic(1);
+
+        connection.setAutoCommit(false);
+
+        connection.execute(
+                "UPDATE tablea SET id=100 WHERE id=1",
+                "UPDATE tableb SET id=100 WHERE id=1");
+
+        final SourceRecords records = consumeRecordsByTopic(6);
+        final List<SourceRecord> tableA = records.recordsForTopic("server1.dbo.tablea");
+        final List<SourceRecord> tableB = records.recordsForTopic("server1.dbo.tableb");
+        Assertions.assertThat(tableA).hasSize(3);
+        Assertions.assertThat(tableB).hasSize(3);
+
+        final List<SchemaAndValueField> expectedDeleteRowA = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 1),
+                new SchemaAndValueField("cola", Schema.OPTIONAL_STRING_SCHEMA, "a"));
+        final List<SchemaAndValueField> expectedDeleteKeyA = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 1));
+        final List<SchemaAndValueField> expectedInsertRowA = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 100),
+                new SchemaAndValueField("cola", Schema.OPTIONAL_STRING_SCHEMA, "a"));
+        final List<SchemaAndValueField> expectedInsertKeyA = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 100));
+
+        final SourceRecord deleteRecordA = tableA.get(0);
+        final SourceRecord tombstoneRecordA = tableA.get(1);
+        final SourceRecord insertRecordA = tableA.get(2);
+
+        final Struct deleteKeyA = (Struct) deleteRecordA.key();
+        final Struct deleteValueA = (Struct) deleteRecordA.value();
+        assertRecord(deleteValueA.getStruct("before"), expectedDeleteRowA);
+        assertRecord(deleteKeyA, expectedDeleteKeyA);
+        assertNull(deleteValueA.get("after"));
+
+        final Struct tombstoneKeyA = (Struct) tombstoneRecordA.key();
+        final Struct tombstoneValueA = (Struct) tombstoneRecordA.value();
+        assertRecord(tombstoneKeyA, expectedDeleteKeyA);
+        assertNull(tombstoneValueA);
+
+        final Struct insertKeyA = (Struct) insertRecordA.key();
+        final Struct insertValueA = (Struct) insertRecordA.value();
+        assertRecord(insertValueA.getStruct("after"), expectedInsertRowA);
+        assertRecord(insertKeyA, expectedInsertKeyA);
+        assertNull(insertValueA.get("before"));
+
+        final List<SchemaAndValueField> expectedDeleteRowB = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 1),
+                new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
+        final List<SchemaAndValueField> expectedDeleteKeyB = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 1));
+        final List<SchemaAndValueField> expectedInsertRowB = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 100),
+                new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
+        final List<SchemaAndValueField> expectedInsertKeyB = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 100));
+
+        final SourceRecord deleteRecordB = tableB.get(0);
+        final SourceRecord tombstoneRecordB = tableB.get(1);
+        final SourceRecord insertRecordB = tableB.get(2);
+
+        final Struct deletekeyB = (Struct) deleteRecordB.key();
+        final Struct deleteValueB = (Struct) deleteRecordB.value();
+        assertRecord(deleteValueB.getStruct("before"), expectedDeleteRowB);
+        assertRecord(deletekeyB, expectedDeleteKeyB);
+        assertNull(deleteValueB.get("after"));
+        assertThat(deleteValueB.getStruct("source").getInt64("event_serial_no")).isEqualTo(1L);
+
+        final Struct tombstonekeyB = (Struct) tombstoneRecordB.key();
+        final Struct tombstoneValueB = (Struct) tombstoneRecordB.value();
+        assertRecord(tombstonekeyB, expectedDeleteKeyB);
+        assertNull(tombstoneValueB);
+
+        final Struct insertkeyB = (Struct) insertRecordB.key();
+        final Struct insertValueB = (Struct) insertRecordB.value();
+        assertRecord(insertValueB.getStruct("after"), expectedInsertRowB);
+        assertRecord(insertkeyB, expectedInsertKeyB);
+        assertNull(insertValueB.get("before"));
+        assertThat(insertValueB.getStruct("source").getInt64("event_serial_no")).isEqualTo(2L);
+
+        stopConnector();
+    }
+
+    @Test
+    @FixFor("DBZ-1152")
+    public void updatePrimaryKeyWithRestartInMiddle() throws Exception {
+
+        final Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .build();
+
+        start(SqlServerConnector.class, config, record -> {
+            final Struct envelope = (Struct) record.value();
+            return envelope != null && "c".equals(envelope.get("op")) && (envelope.getStruct("after").getInt32("id") == 100);
+        });
+        assertConnectorIsRunning();
+
+        // Testing.Print.enable();
+        // Wait for snapshot completion
+        consumeRecordsByTopic(1);
+
+        connection.execute("INSERT INTO tableb VALUES(1, 'b')");
+        consumeRecordsByTopic(1);
+
+        connection.setAutoCommit(false);
+
+        connection.execute(
+                "UPDATE tablea SET id=100 WHERE id=1",
+                "UPDATE tableb SET id=100 WHERE id=1");
+
+        final SourceRecords records1 = consumeRecordsByTopic(2);
+        stopConnector();
+
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+        final SourceRecords records2 = consumeRecordsByTopic(4);
+
+        final List<SourceRecord> tableA = records1.recordsForTopic("server1.dbo.tablea");
+        tableA.addAll(records2.recordsForTopic("server1.dbo.tablea"));
+        final List<SourceRecord> tableB = records2.recordsForTopic("server1.dbo.tableb");
+        Assertions.assertThat(tableA).hasSize(3);
+        Assertions.assertThat(tableB).hasSize(3);
+
+        final List<SchemaAndValueField> expectedDeleteRowA = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 1),
+                new SchemaAndValueField("cola", Schema.OPTIONAL_STRING_SCHEMA, "a"));
+        final List<SchemaAndValueField> expectedDeleteKeyA = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 1));
+        final List<SchemaAndValueField> expectedInsertRowA = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 100),
+                new SchemaAndValueField("cola", Schema.OPTIONAL_STRING_SCHEMA, "a"));
+        final List<SchemaAndValueField> expectedInsertKeyA = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 100));
+
+        final SourceRecord deleteRecordA = tableA.get(0);
+        final SourceRecord tombstoneRecordA = tableA.get(1);
+        final SourceRecord insertRecordA = tableA.get(2);
+
+        final Struct deleteKeyA = (Struct) deleteRecordA.key();
+        final Struct deleteValueA = (Struct) deleteRecordA.value();
+        assertRecord(deleteValueA.getStruct("before"), expectedDeleteRowA);
+        assertRecord(deleteKeyA, expectedDeleteKeyA);
+        assertNull(deleteValueA.get("after"));
+
+        final Struct tombstoneKeyA = (Struct) tombstoneRecordA.key();
+        final Struct tombstoneValueA = (Struct) tombstoneRecordA.value();
+        assertRecord(tombstoneKeyA, expectedDeleteKeyA);
+        assertNull(tombstoneValueA);
+
+        final Struct insertKeyA = (Struct) insertRecordA.key();
+        final Struct insertValueA = (Struct) insertRecordA.value();
+        assertRecord(insertValueA.getStruct("after"), expectedInsertRowA);
+        assertRecord(insertKeyA, expectedInsertKeyA);
+        assertNull(insertValueA.get("before"));
+
+        final List<SchemaAndValueField> expectedDeleteRowB = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 1),
+                new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
+        final List<SchemaAndValueField> expectedDeleteKeyB = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 1));
+        final List<SchemaAndValueField> expectedInsertRowB = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 100),
+                new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
+        final List<SchemaAndValueField> expectedInsertKeyB = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 100));
+
+        final SourceRecord deleteRecordB = tableB.get(0);
+        final SourceRecord tombstoneRecordB = tableB.get(1);
+        final SourceRecord insertRecordB = tableB.get(2);
+
+        final Struct deletekeyB = (Struct) deleteRecordB.key();
+        final Struct deleteValueB = (Struct) deleteRecordB.value();
+        assertRecord(deleteValueB.getStruct("before"), expectedDeleteRowB);
+        assertRecord(deletekeyB, expectedDeleteKeyB);
+        assertNull(deleteValueB.get("after"));
+
+        final Struct tombstonekeyB = (Struct) tombstoneRecordB.key();
+        final Struct tombstoneValueB = (Struct) tombstoneRecordB.value();
+        assertRecord(tombstonekeyB, expectedDeleteKeyB);
+        assertNull(tombstoneValueB);
+
+        final Struct insertkeyB = (Struct) insertRecordB.key();
+        final Struct insertValueB = (Struct) insertRecordB.value();
+        assertRecord(insertValueB.getStruct("after"), expectedInsertRowB);
+        assertRecord(insertkeyB, expectedInsertKeyB);
+        assertNull(insertValueB.get("before"));
 
         stopConnector();
     }
@@ -220,11 +474,9 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         for (int i = 0; i < RECORDS_PER_TABLE; i++) {
             final int id = ID_START + i;
             connection.execute(
-                    "INSERT INTO tablea VALUES(" + id + ", 'a')"
-            );
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
             connection.execute(
-                    "INSERT INTO tableb VALUES(" + id + ", 'b')"
-            );
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
         }
 
         consumeRecordsByTopic(RECORDS_PER_TABLE * TABLES);
@@ -232,11 +484,9 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         for (int i = 0; i < RECORDS_PER_TABLE; i++) {
             final int id = ID_RESTART + i;
             connection.execute(
-                    "INSERT INTO tablea VALUES(" + id + ", 'a')"
-            );
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
             connection.execute(
-                    "INSERT INTO tableb VALUES(" + id + ", 'b')"
-            );
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
         }
 
         start(SqlServerConnector.class, config);
@@ -260,12 +510,12 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
                     new SchemaAndValueField("id", Schema.INT32_SCHEMA, id),
                     new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
 
-            final Struct valueA = (Struct)recordA.value();
-            assertRecord((Struct)valueA.get("after"), expectedRowA);
+            final Struct valueA = (Struct) recordA.value();
+            assertRecord((Struct) valueA.get("after"), expectedRowA);
             assertNull(valueA.get("before"));
 
-            final Struct valueB = (Struct)recordB.value();
-            assertRecord((Struct)valueB.get("after"), expectedRowB);
+            final Struct valueB = (Struct) recordB.value();
+            assertRecord((Struct) valueB.get("after"), expectedRowB);
             assertNull(valueB.get("before"));
         }
     }
@@ -284,11 +534,9 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         for (int i = 0; i < RECORDS_PER_TABLE; i++) {
             final int id = ID_START + i;
             connection.execute(
-                    "INSERT INTO tablea VALUES(" + id + ", 'a')"
-            );
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
             connection.execute(
-                    "INSERT INTO tableb VALUES(" + id + ", 'b')"
-            );
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
         }
 
         for (int i = 0; !connection.getMaxLsn().isAvailable(); i++) {
@@ -318,11 +566,9 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         for (int i = 0; i < RECORDS_PER_TABLE; i++) {
             final int id = ID_RESTART + i;
             connection.execute(
-                    "INSERT INTO tablea VALUES(" + id + ", 'a')"
-            );
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
             connection.execute(
-                    "INSERT INTO tableb VALUES(" + id + ", 'b')"
-            );
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
         }
 
         start(SqlServerConnector.class, config);
@@ -346,12 +592,12 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
                     new SchemaAndValueField("id", Schema.INT32_SCHEMA, id),
                     new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
 
-            final Struct valueA = (Struct)recordA.value();
-            assertRecord((Struct)valueA.get("after"), expectedRowA);
+            final Struct valueA = (Struct) recordA.value();
+            assertRecord((Struct) valueA.get("after"), expectedRowA);
             assertNull(valueA.get("before"));
 
-            final Struct valueB = (Struct)recordB.value();
-            assertRecord((Struct)valueB.get("after"), expectedRowB);
+            final Struct valueB = (Struct) recordB.value();
+            assertRecord((Struct) valueB.get("after"), expectedRowB);
             assertNull(valueB.get("before"));
 
             assertThat(recordA.sourceOffset().get("snapshot")).as("Streaming phase").isNull();
@@ -374,8 +620,7 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
                 .with(SqlServerConnectorConfig.TABLE_WHITELIST, "dbo.tableb")
                 .build();
         connection.execute(
-                "INSERT INTO tableb VALUES(1, 'b')"
-        );
+                "INSERT INTO tableb VALUES(1, 'b')");
 
         start(SqlServerConnector.class, config);
         assertConnectorIsRunning();
@@ -386,11 +631,9 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         for (int i = 0; i < RECORDS_PER_TABLE; i++) {
             final int id = ID_START + i;
             connection.execute(
-                    "INSERT INTO tablea VALUES(" + id + ", 'a')"
-            );
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
             connection.execute(
-                    "INSERT INTO tableb VALUES(" + id + ", 'b')"
-            );
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
         }
 
         final SourceRecords records = consumeRecordsByTopic(RECORDS_PER_TABLE * TABLES);
@@ -412,8 +655,7 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
                 .with(SqlServerConnectorConfig.TABLE_BLACKLIST, "dbo.tablea")
                 .build();
         connection.execute(
-                "INSERT INTO tableb VALUES(1, 'b')"
-        );
+                "INSERT INTO tableb VALUES(1, 'b')");
 
         start(SqlServerConnector.class, config);
         assertConnectorIsRunning();
@@ -424,11 +666,9 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
         for (int i = 0; i < RECORDS_PER_TABLE; i++) {
             final int id = ID_START + i;
             connection.execute(
-                    "INSERT INTO tablea VALUES(" + id + ", 'a')"
-            );
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
             connection.execute(
-                    "INSERT INTO tableb VALUES(" + id + ", 'b')"
-            );
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
         }
 
         final SourceRecords records = consumeRecordsByTopic(RECORDS_PER_TABLE * TABLES);
@@ -445,8 +685,7 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
     public void blacklistColumn() throws Exception {
         connection.execute(
                 "CREATE TABLE blacklist_column_table_a (id int, name varchar(30), amount integer primary key(id))",
-                "CREATE TABLE blacklist_column_table_b (id int, name varchar(30), amount integer primary key(id))"
-        );
+                "CREATE TABLE blacklist_column_table_b (id int, name varchar(30), amount integer primary key(id))");
         TestHelper.enableTableCdc(connection, "blacklist_column_table_a");
         TestHelper.enableTableCdc(connection, "blacklist_column_table_b");
 
@@ -565,8 +804,275 @@ public class SqlServerConnectorIT extends AbstractConnectorTest {
 
         connection.query("select count(1) from sys.dm_exec_sessions where program_name = 'Debezium App DBZ-964'", rs -> {
             rs.next();
-            assertThat(rs.getInt(1)).isEqualTo(1);
+            assertThat(rs.getInt(1)).isGreaterThanOrEqualTo(1);
         });
+    }
+
+    private void restartInTheMiddleOfTx(boolean restartJustAfterSnapshot, boolean afterStreaming) throws Exception {
+        final int RECORDS_PER_TABLE = 30;
+        final int TABLES = 2;
+        final int ID_START = 10;
+        final int ID_RESTART = 1000;
+        final int HALF_ID = ID_START + RECORDS_PER_TABLE / 2;
+        final Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .build();
+
+        if (restartJustAfterSnapshot) {
+            start(SqlServerConnector.class, config);
+            assertConnectorIsRunning();
+
+            // Wait for snapshot to be completed
+            consumeRecordsByTopic(1);
+            stopConnector();
+            connection.execute("INSERT INTO tablea VALUES(-1, '-a')");
+        }
+
+        start(SqlServerConnector.class, config, record -> {
+            if (!"server1.dbo.tablea.Envelope".equals(record.valueSchema().name())) {
+                return false;
+            }
+            final Struct envelope = (Struct) record.value();
+            final Struct after = envelope.getStruct("after");
+            final Integer id = after.getInt32("id");
+            final String value = after.getString("cola");
+            return id != null && id == HALF_ID && "a".equals(value);
+        });
+        assertConnectorIsRunning();
+
+        // Wait for snapshot to be completed or a first streaming message delivered
+        consumeRecordsByTopic(1);
+
+        if (afterStreaming) {
+            connection.execute("INSERT INTO tablea VALUES(-2, '-a')");
+            final SourceRecords records = consumeRecordsByTopic(1);
+            final List<SchemaAndValueField> expectedRow = Arrays.asList(
+                    new SchemaAndValueField("id", Schema.INT32_SCHEMA, -2),
+                    new SchemaAndValueField("cola", Schema.OPTIONAL_STRING_SCHEMA, "-a"));
+            assertRecord(((Struct) records.allRecordsInOrder().get(0).value()).getStruct(Envelope.FieldName.AFTER), expectedRow);
+        }
+
+        connection.setAutoCommit(false);
+        for (int i = 0; i < RECORDS_PER_TABLE; i++) {
+            final int id = ID_START + i;
+            connection.executeWithoutCommitting(
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
+            connection.executeWithoutCommitting(
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
+        }
+        connection.connection().commit();
+        List<SourceRecord> records = consumeRecordsByTopic(RECORDS_PER_TABLE).allRecordsInOrder();
+
+        assertThat(records).hasSize(RECORDS_PER_TABLE);
+        SourceRecord lastRecordForOffset = records.get(RECORDS_PER_TABLE - 1);
+        Struct value = (Struct) lastRecordForOffset.value();
+        final List<SchemaAndValueField> expectedLastRow = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, HALF_ID - 1),
+                new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
+        assertRecord((Struct) value.get("after"), expectedLastRow);
+
+        stopConnector();
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+
+        SourceRecords sourceRecords = consumeRecordsByTopic(RECORDS_PER_TABLE);
+        records = sourceRecords.allRecordsInOrder();
+        assertThat(records).hasSize(RECORDS_PER_TABLE);
+
+        List<SourceRecord> tableA = sourceRecords.recordsForTopic("server1.dbo.tablea");
+        List<SourceRecord> tableB = sourceRecords.recordsForTopic("server1.dbo.tableb");
+        for (int i = 0; i < RECORDS_PER_TABLE / 2; i++) {
+            final int id = HALF_ID + i;
+            final SourceRecord recordA = tableA.get(i);
+            final SourceRecord recordB = tableB.get(i);
+            final List<SchemaAndValueField> expectedRowA = Arrays.asList(
+                    new SchemaAndValueField("id", Schema.INT32_SCHEMA, id),
+                    new SchemaAndValueField("cola", Schema.OPTIONAL_STRING_SCHEMA, "a"));
+            final List<SchemaAndValueField> expectedRowB = Arrays.asList(
+                    new SchemaAndValueField("id", Schema.INT32_SCHEMA, id),
+                    new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
+
+            final Struct valueA = (Struct) recordA.value();
+            assertRecord((Struct) valueA.get("after"), expectedRowA);
+            assertNull(valueA.get("before"));
+
+            final Struct valueB = (Struct) recordB.value();
+            assertRecord((Struct) valueB.get("after"), expectedRowB);
+            assertNull(valueB.get("before"));
+        }
+
+        for (int i = 0; i < RECORDS_PER_TABLE; i++) {
+            final int id = ID_RESTART + i;
+            connection.executeWithoutCommitting(
+                    "INSERT INTO tablea VALUES(" + id + ", 'a')");
+            connection.executeWithoutCommitting(
+                    "INSERT INTO tableb VALUES(" + id + ", 'b')");
+            connection.connection().commit();
+        }
+
+        sourceRecords = consumeRecordsByTopic(RECORDS_PER_TABLE * TABLES);
+        tableA = sourceRecords.recordsForTopic("server1.dbo.tablea");
+        tableB = sourceRecords.recordsForTopic("server1.dbo.tableb");
+
+        Assertions.assertThat(tableA).hasSize(RECORDS_PER_TABLE);
+        Assertions.assertThat(tableB).hasSize(RECORDS_PER_TABLE);
+
+        for (int i = 0; i < RECORDS_PER_TABLE; i++) {
+            final int id = i + ID_RESTART;
+            final SourceRecord recordA = tableA.get(i);
+            final SourceRecord recordB = tableB.get(i);
+            final List<SchemaAndValueField> expectedRowA = Arrays.asList(
+                    new SchemaAndValueField("id", Schema.INT32_SCHEMA, id),
+                    new SchemaAndValueField("cola", Schema.OPTIONAL_STRING_SCHEMA, "a"));
+            final List<SchemaAndValueField> expectedRowB = Arrays.asList(
+                    new SchemaAndValueField("id", Schema.INT32_SCHEMA, id),
+                    new SchemaAndValueField("colb", Schema.OPTIONAL_STRING_SCHEMA, "b"));
+
+            final Struct valueA = (Struct) recordA.value();
+            assertRecord((Struct) valueA.get("after"), expectedRowA);
+            assertNull(valueA.get("before"));
+
+            final Struct valueB = (Struct) recordB.value();
+            assertRecord((Struct) valueB.get("after"), expectedRowB);
+            assertNull(valueB.get("before"));
+        }
+    }
+
+    @Test
+    @FixFor("DBZ-1128")
+    public void restartInTheMiddleOfTxAfterSnapshot() throws Exception {
+        restartInTheMiddleOfTx(true, false);
+    }
+
+    @Test
+    @FixFor("DBZ-1128")
+    public void restartInTheMiddleOfTxAfterCompletedTx() throws Exception {
+        restartInTheMiddleOfTx(false, true);
+    }
+
+    @Test
+    @FixFor("DBZ-1128")
+    public void restartInTheMiddleOfTx() throws Exception {
+        restartInTheMiddleOfTx(false, false);
+    }
+
+    @Test
+    @FixFor("DBZ-1242")
+    public void testEmptySchemaWarningAfterApplyingFilters() throws Exception {
+        // This captures all logged messages, allowing us to verify log message was written.
+        final LogInterceptor logInterceptor = new LogInterceptor();
+
+        Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .with(SqlServerConnectorConfig.TABLE_WHITELIST, "my_products")
+                .build();
+
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+        waitForAvailableRecords(100, TimeUnit.MILLISECONDS);
+
+        stopConnector(value -> assertThat(logInterceptor.containsWarnMessage(NO_MONITORED_TABLES_WARNING)).isTrue());
+    }
+
+    @Test
+    @FixFor("DBZ-1242")
+    public void testNoEmptySchemaWarningAfterApplyingFilters() throws Exception {
+        // This captures all logged messages, allowing us to verify log message was written.
+        final LogInterceptor logInterceptor = new LogInterceptor();
+
+        Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .build();
+
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+        waitForAvailableRecords(100, TimeUnit.MILLISECONDS);
+
+        stopConnector(value -> assertThat(logInterceptor.containsWarnMessage(NO_MONITORED_TABLES_WARNING)).isFalse());
+    }
+
+    @Test
+    @FixFor("DBZ-916")
+    public void keylessTable() throws Exception {
+        connection.execute(
+                "CREATE TABLE keyless (id int, name varchar(30))",
+                "INSERT INTO keyless VALUES(1, 'k')");
+        TestHelper.enableTableCdc(connection, "keyless");
+
+        final Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .with(SqlServerConnectorConfig.TABLE_WHITELIST, "dbo.keyless")
+                .build();
+
+        start(SqlServerConnector.class, config);
+        assertConnectorIsRunning();
+
+        final List<SchemaAndValueField> key = Arrays.asList(
+                new SchemaAndValueField("id", Schema.OPTIONAL_INT32_SCHEMA, 1),
+                new SchemaAndValueField("name", Schema.OPTIONAL_STRING_SCHEMA, "k"));
+        final List<SchemaAndValueField> key2 = Arrays.asList(
+                new SchemaAndValueField("id", Schema.OPTIONAL_INT32_SCHEMA, 2),
+                new SchemaAndValueField("name", Schema.OPTIONAL_STRING_SCHEMA, "k"));
+        final List<SchemaAndValueField> key3 = Arrays.asList(
+                new SchemaAndValueField("id", Schema.OPTIONAL_INT32_SCHEMA, 3),
+                new SchemaAndValueField("name", Schema.OPTIONAL_STRING_SCHEMA, "k"));
+
+        // Wait for snapshot completion
+        SourceRecords records = consumeRecordsByTopic(1);
+        assertThat(records.recordsForTopic("server1.dbo.keyless").get(0).key()).isNull();
+        assertThat(records.recordsForTopic("server1.dbo.keyless").get(0).keySchema()).isNull();
+
+        connection.execute(
+                "INSERT INTO keyless VALUES(2, 'k')");
+        records = consumeRecordsByTopic(1);
+        assertThat(records.recordsForTopic("server1.dbo.keyless").get(0).key()).isNull();
+        assertThat(records.recordsForTopic("server1.dbo.keyless").get(0).key()).isNull();
+
+        connection.execute(
+                "UPDATE keyless SET id=3 WHERE ID=2");
+        records = consumeRecordsByTopic(3);
+        final SourceRecord update1 = records.recordsForTopic("server1.dbo.keyless").get(0);
+
+        assertThat(update1.key()).isNull();
+        assertThat(update1.keySchema()).isNull();
+        assertRecord(((Struct) update1.value()).getStruct(Envelope.FieldName.BEFORE), key2);
+        assertRecord(((Struct) update1.value()).getStruct(Envelope.FieldName.AFTER), key3);
+
+        connection.execute(
+                "DELETE FROM keyless WHERE id=3");
+        records = consumeRecordsByTopic(2);
+        assertThat(records.recordsForTopic("server1.dbo.keyless").get(0).key()).isNull();
+        assertThat(records.recordsForTopic("server1.dbo.keyless").get(0).keySchema()).isNull();
+        assertNull(records.recordsForTopic("server1.dbo.keyless").get(1).value());
+
+        stopConnector();
+    }
+
+    @Test
+    @FixFor("DBZ-1015")
+    public void shouldRewriteIdentityKey() throws InterruptedException, SQLException {
+
+        connection.execute(
+                "CREATE TABLE keyless (id int, name varchar(30))",
+                "INSERT INTO keyless VALUES(1, 'k')");
+        TestHelper.enableTableCdc(connection, "keyless");
+
+        final Configuration config = TestHelper.defaultConfig()
+                .with(SqlServerConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .with(SqlServerConnectorConfig.TABLE_WHITELIST, "dbo.keyless")
+                // rewrite key from table 'products': from {null} to {id}
+                .with(SqlServerConnectorConfig.MSG_KEY_COLUMNS, "(.*).keyless:id")
+                .build();
+
+        start(SqlServerConnector.class, config);
+
+        SourceRecords records = consumeRecordsByTopic(1);
+        List<SourceRecord> recordsForTopic = records.recordsForTopic("server1.dbo.keyless");
+        assertThat(recordsForTopic.get(0).key()).isNotNull();
+        Struct key = (Struct) recordsForTopic.get(0).key();
+        Assertions.assertThat(key.get("id")).isNotNull();
+
+        stopConnector();
     }
 
     private void assertRecord(Struct record, List<SchemaAndValueField> expected) {

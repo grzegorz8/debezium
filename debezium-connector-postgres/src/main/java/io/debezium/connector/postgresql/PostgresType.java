@@ -83,16 +83,16 @@ public class PostgresType {
      *
      * @return the default length of the type
      */
-   public int getDefaultLength() {
-       if (typeInfo == null) {
-           return TypeRegistry.UNKNOWN_LENGTH;
-       }
-       int size = typeInfo.getPrecision(oid, TypeRegistry.NO_TYPE_MODIFIER);
-       if (size == 0) {
-           size = typeInfo.getDisplaySize(oid, TypeRegistry.NO_TYPE_MODIFIER);
-       }
-       return size;
-   }
+    public int getDefaultLength() {
+        if (typeInfo == null) {
+            return TypeRegistry.UNKNOWN_LENGTH;
+        }
+        int size = typeInfo.getPrecision(oid, TypeRegistry.NO_TYPE_MODIFIER);
+        if (size == 0) {
+            size = typeInfo.getDisplaySize(oid, TypeRegistry.NO_TYPE_MODIFIER);
+        }
+        return size;
+    }
 
     /**
      *
@@ -114,14 +114,22 @@ public class PostgresType {
             return TypeRegistry.UNKNOWN_LENGTH;
         }
         switch (oid) {
-        case Oid.TIMESTAMP:
-        case Oid.TIMESTAMPTZ:
-        case Oid.TIME:
-        case Oid.TIMETZ:
-        case Oid.INTERVAL:
-            return typeInfo.getPrecision(oid, modifier);
+            case Oid.TIMESTAMP:
+            case Oid.TIMESTAMPTZ:
+            case Oid.TIME:
+            case Oid.TIMETZ:
+            case Oid.INTERVAL:
+                return typeInfo.getPrecision(oid, modifier);
         }
         return modifier;
+    }
+
+    /**
+     * Get the underlying postgres type information object
+     * @return the type information object; may be null
+     */
+    public TypeInfo getTypeInfo() {
+        return typeInfo;
     }
 
     /**
@@ -133,12 +141,12 @@ public class PostgresType {
             return TypeRegistry.UNKNOWN_LENGTH;
         }
         switch (oid) {
-        case Oid.TIMESTAMP:
-        case Oid.TIMESTAMPTZ:
-        case Oid.TIME:
-        case Oid.TIMETZ:
-        case Oid.INTERVAL:
-            return typeInfo.getScale(oid, modifier);
+            case Oid.TIMESTAMP:
+            case Oid.TIMESTAMPTZ:
+            case Oid.TIME:
+            case Oid.TIMETZ:
+            case Oid.INTERVAL:
+                return typeInfo.getScale(oid, modifier);
         }
         return getDefaultScale();
     }
@@ -153,15 +161,19 @@ public class PostgresType {
 
     @Override
     public boolean equals(Object obj) {
-        if (this == obj)
+        if (this == obj) {
             return true;
-        if (obj == null)
+        }
+        if (obj == null) {
             return false;
-        if (getClass() != obj.getClass())
+        }
+        if (getClass() != obj.getClass()) {
             return false;
+        }
         PostgresType other = (PostgresType) obj;
-        if (oid != other.oid)
+        if (oid != other.oid) {
             return false;
+        }
         return true;
     }
 

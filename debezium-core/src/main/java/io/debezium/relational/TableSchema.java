@@ -5,11 +5,14 @@
  */
 package io.debezium.relational;
 
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.Function;
 
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.debezium.annotation.Immutable;
 import io.debezium.data.Envelope;
@@ -49,6 +52,8 @@ import io.debezium.schema.DataCollectionSchema;
 @Immutable
 public class TableSchema implements DataCollectionSchema {
 
+    private static final Logger logger = LoggerFactory.getLogger(TableSchema.class);
+
     private final TableId id;
     private final Schema keySchema;
     private final Envelope envelopeSchema;
@@ -69,7 +74,7 @@ public class TableSchema implements DataCollectionSchema {
      *            may return nulls
      */
     public TableSchema(TableId id, Schema keySchema, Function<Object[], Object> keyGenerator,
-            Envelope envelopeSchema, Schema valueSchema, Function<Object[], Struct> valueGenerator) {
+                       Envelope envelopeSchema, Schema valueSchema, Function<Object[], Struct> valueGenerator) {
         this.id = id;
         this.keySchema = keySchema;
         this.envelopeSchema = envelopeSchema;
@@ -121,6 +126,9 @@ public class TableSchema implements DataCollectionSchema {
      * @return the key, or null if the {@code columnData}
      */
     public Object keyFromColumnData(Object[] columnData) {
+        if (logger.isTraceEnabled()) {
+            logger.trace("columnData from current stack: {}", Arrays.toString(columnData));
+        }
         return columnData == null ? null : keyGenerator.apply(columnData);
     }
 
@@ -142,10 +150,12 @@ public class TableSchema implements DataCollectionSchema {
 
     @Override
     public boolean equals(Object obj) {
-        if ( obj == this ) return true;
-        if ( obj instanceof TableSchema ) {
-            TableSchema that = (TableSchema)obj;
-            return Objects.equals(this.keySchema(),that.keySchema()) && Objects.equals(this.valueSchema(),that.valueSchema());
+        if (obj == this) {
+            return true;
+        }
+        if (obj instanceof TableSchema) {
+            TableSchema that = (TableSchema) obj;
+            return Objects.equals(this.keySchema(), that.keySchema()) && Objects.equals(this.valueSchema(), that.valueSchema());
         }
         return false;
     }

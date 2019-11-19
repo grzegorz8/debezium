@@ -26,23 +26,23 @@ public class HistoryRecordTest {
 
     @Test
     public void canSerializeAndDeserializeHistoryRecord() throws Exception {
-        Map<String,Object> source = Collect.linkMapOf("server", "abc");
-        Map<String,Object> position = Collect.linkMapOf("file", "x.log", "positionInt", 100, "positionLong", Long.MAX_VALUE, "entry", 1);
+        Map<String, Object> source = Collect.linkMapOf("server", "abc");
+        Map<String, Object> position = Collect.linkMapOf("file", "x.log", "positionInt", 100, "positionLong", Long.MAX_VALUE, "entry", 1);
         String databaseName = "db";
         String schemaName = "myschema";
         String ddl = "CREATE TABLE foo ( first VARCHAR(22) NOT NULL );";
 
         Table table = Table.editor()
-            .tableId(new TableId(databaseName, schemaName, "foo"))
-            .addColumn(Column.editor()
-                    .name("first")
-                    .jdbcType(Types.VARCHAR)
-                    .type("VARCHAR")
-                    .length(22)
-                    .optional(false)
-                    .create())
-            .setPrimaryKeyNames("first")
-            .create();
+                .tableId(new TableId(databaseName, schemaName, "foo"))
+                .addColumn(Column.editor()
+                        .name("first")
+                        .jdbcType(Types.VARCHAR)
+                        .type("VARCHAR")
+                        .length(22)
+                        .optional(false)
+                        .create())
+                .setPrimaryKeyNames("first")
+                .create();
 
         TableChanges tableChanges = new TableChanges().create(table);
 
@@ -66,7 +66,7 @@ public class HistoryRecordTest {
         assertThat(deserialized.ddl()).isEqualTo(ddl);
 
         System.out.println(record);
-        assertThat((Object)TableChanges.fromArray(deserialized.tableChanges())).isEqualTo(tableChanges);
+        assertThat((Object) TableChanges.fromArray(deserialized.tableChanges(), true)).isEqualTo(tableChanges);
 
     }
 }

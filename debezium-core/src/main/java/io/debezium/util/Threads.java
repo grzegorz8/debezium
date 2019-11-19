@@ -141,8 +141,8 @@ public class Threads {
                                                long timeout, TimeUnit timeoutUnit,
                                                TimeSince elapsedTimer, Thread threadToInterrupt) {
         return timeout(threadName, timeout, timeoutUnit, 100, TimeUnit.MILLISECONDS,
-                       elapsedTimer::elapsedTime, elapsedTimer::reset,
-                       () -> threadToInterrupt.interrupt());
+                elapsedTimer::elapsedTime, elapsedTimer::reset,
+                () -> threadToInterrupt.interrupt());
     }
 
     /**
@@ -163,8 +163,8 @@ public class Threads {
                                  long timeout, TimeUnit timeoutUnit,
                                  TimeSince elapsedTimer, Runnable uponTimeout) {
         return timeout(threadName, timeout, timeoutUnit, 100, TimeUnit.MILLISECONDS,
-                       elapsedTimer::elapsedTime, elapsedTimer::reset,
-                       uponTimeout);
+                elapsedTimer::elapsedTime, elapsedTimer::reset,
+                uponTimeout);
     }
 
     /**
@@ -188,8 +188,8 @@ public class Threads {
                                  long sleepInterval, TimeUnit sleepUnit,
                                  TimeSince elapsedTimer, Runnable uponTimeout) {
         return timeout(threadName, timeout, timeoutUnit, sleepInterval, sleepUnit,
-                       elapsedTimer::elapsedTime, elapsedTimer::reset,
-                       uponTimeout);
+                elapsedTimer::elapsedTime, elapsedTimer::reset,
+                uponTimeout);
     }
 
     /**
@@ -214,13 +214,16 @@ public class Threads {
         final long timeoutInMillis = timeoutUnit.toMillis(timeout);
         final long sleepTimeInMillis = sleepUnit.toMillis(sleepInterval);
         Runnable r = () -> {
-            if (uponStart != null) uponStart.run();
+            if (uponStart != null) {
+                uponStart.run();
+            }
             while (elapsedTime.getAsLong() < timeoutInMillis) {
                 try {
                     Thread.sleep(sleepTimeInMillis);
-                } catch (InterruptedException e) {
+                }
+                catch (InterruptedException e) {
                     // awoke from sleep
-                    Thread.interrupted();
+                    Thread.currentThread().interrupt();
                     return;
                 }
             }
@@ -244,7 +247,9 @@ public class Threads {
      * @return the thread factory setting the correct name
      */
     public static ThreadFactory threadFactory(Class<? extends SourceConnector> connector, String connectorId, String name, boolean indexed) {
-        LOGGER.info("Requested thread factory for connector {}, id = {} named = {}", connector.getSimpleName(), connectorId, name);
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info("Requested thread factory for connector {}, id = {} named = {}", connector.getSimpleName(), connectorId, name);
+        }
 
         return new ThreadFactory() {
             private final AtomicInteger index = new AtomicInteger(0);
@@ -252,11 +257,11 @@ public class Threads {
             @Override
             public Thread newThread(Runnable r) {
                 StringBuilder threadName = new StringBuilder(DEBEZIUM_THREAD_NAME_PREFIX)
-                                            .append(connector.getSimpleName().toLowerCase())
-                                            .append('-')
-                                            .append(connectorId)
-                                            .append('-')
-                                            .append(name);
+                        .append(connector.getSimpleName().toLowerCase())
+                        .append('-')
+                        .append(connectorId)
+                        .append('-')
+                        .append(name);
                 if (indexed) {
                     threadName.append('-').append(index.getAndIncrement());
                 }

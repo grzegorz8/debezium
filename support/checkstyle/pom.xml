@@ -3,14 +3,14 @@
    <parent>
       <groupId>org.jboss</groupId>
       <artifactId>jboss-parent</artifactId>
-      <version>19</version>
+      <version>35</version>
       <!-- same as parent POM -->
    </parent>
 
    <modelVersion>4.0.0</modelVersion>
    <groupId>io.debezium</groupId>
    <artifactId>debezium-checkstyle</artifactId>
-   <version>0.9.0-SNAPSHOT</version>
+   <version>1.0.0-SNAPSHOT</version>
    <name>Debezium Checkstyle Rules</name>
    <description>Contains the definitions for the Debezium commons code style and conventions</description>
 
@@ -62,7 +62,7 @@
         <dependency>
             <groupId>com.puppycrawl.tools</groupId>
             <artifactId>checkstyle</artifactId>
-            <version>6.7</version>
+            <version>${version.checkstyle}</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.sun</groupId>

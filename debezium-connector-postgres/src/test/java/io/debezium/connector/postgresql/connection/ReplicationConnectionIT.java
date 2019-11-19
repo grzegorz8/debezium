@@ -25,10 +25,15 @@ import java.util.function.Consumer;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
 
 import io.debezium.connector.postgresql.DecoderDifferences;
 import io.debezium.connector.postgresql.TestHelper;
+import io.debezium.connector.postgresql.junit.SkipTestDependingOnDecoderPluginNameRule;
+import io.debezium.connector.postgresql.junit.SkipWhenDecoderPluginNameIs;
+import io.debezium.connector.postgresql.junit.SkipWhenDecoderPluginNameIsNot;
 import io.debezium.jdbc.JdbcConnection.ResultSetMapper;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
@@ -40,12 +45,15 @@ import io.debezium.util.Metronome;
  */
 public class ReplicationConnectionIT {
 
+    @Rule
+    public TestRule skip = new SkipTestDependingOnDecoderPluginNameRule();
+
     @Before
     public void before() throws Exception {
         TestHelper.dropAllSchemas();
         String statement = "CREATE SCHEMA IF NOT EXISTS public;" +
-                           "CREATE TABLE table_with_pk (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
-                           "CREATE TABLE table_without_pk (a SERIAL, b NUMERIC(5,2), c TEXT);";
+                "CREATE TABLE table_with_pk (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
+                "CREATE TABLE table_without_pk (a SERIAL, b NUMERIC(5,2), c TEXT);";
         TestHelper.execute(statement);
     }
 
@@ -113,6 +121,7 @@ public class ReplicationConnectionIT {
     }
 
     @Test
+    @SkipWhenDecoderPluginNameIs(value = SkipWhenDecoderPluginNameIs.DecoderPluginName.PGOUTPUT, reason = "An update on a table with no primary key throws PSQLException as tables must have a PK")
     public void shouldReceiveAndDecodeIndividualChanges() throws Exception {
         // create a replication connection which should be dropped once it's closed
         try (ReplicationConnection connection = TestHelper.createForReplication("test", true)) {
@@ -136,18 +145,17 @@ public class ReplicationConnectionIT {
         }
     }
 
-
     @Test
     public void shouldNotReceiveSameChangesIfFlushed() throws Exception {
         // don't drop the replication slot once this is finished
         String slotName = "test";
-        startInsertStop(slotName, this::flushLSN);
+        startInsertStop(slotName, this::flushLsn);
 
         // create a new replication connection with the same slot and check that we don't get back the same changes that we've
         // flushed
         try (ReplicationConnection connection = TestHelper.createForReplication(slotName, true)) {
             ReplicationStream stream = connection.startStreaming();
-            //even when flushing the last received location, the server will send back the last record after reconnecting, not sure why that is...
+            // even when flushing the last received location, the server will send back the last record after reconnecting, not sure why that is...
             expectedMessagesFromStream(stream, 0);
         }
     }
@@ -155,7 +163,7 @@ public class ReplicationConnectionIT {
     @Test
     public void shouldReceiveMissedChangesWhileDown() throws Exception {
         String slotName = "test";
-        startInsertStop(slotName, this::flushLSN);
+        startInsertStop(slotName, this::flushLsn);
 
         // run some more SQL while the slot is stopped
         // this deletes 2 entries so each of them will have a message
@@ -204,11 +212,11 @@ public class ReplicationConnectionIT {
         try (ReplicationConnection connection = TestHelper.createForReplication("test", true)) {
             ReplicationStream stream = connection.startStreaming();
             String statement = "DROP TABLE IF EXISTS table_with_pk;" +
-                               "DROP TABLE IF EXISTS table_without_pk;" +
-                               "CREATE TABLE table_with_pk (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
-                               "CREATE TABLE table_without_pk (a SERIAL, b NUMERIC(5,2), c TEXT);" +
-                               "INSERT INTO table_with_pk (b, c) VALUES('val1', now()); " +
-                               "INSERT INTO table_with_pk (b, c) VALUES('val2', now()); ";
+                    "DROP TABLE IF EXISTS table_without_pk;" +
+                    "CREATE TABLE table_with_pk (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
+                    "CREATE TABLE table_without_pk (a SERIAL, b NUMERIC(5,2), c TEXT);" +
+                    "INSERT INTO table_with_pk (b, c) VALUES('val1', now()); " +
+                    "INSERT INTO table_with_pk (b, c) VALUES('val2', now()); ";
             TestHelper.execute(statement);
             expectedMessagesFromStream(stream, 2);
         }
@@ -219,9 +227,9 @@ public class ReplicationConnectionIT {
         try (ReplicationConnection connection = TestHelper.createForReplication("test", true)) {
             ReplicationStream stream = connection.startStreaming();
             String statement = "DROP TABLE IF EXISTS table_with_pk;" +
-                               "CREATE TABLE table_with_pk (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
-                               "INSERT INTO table_with_pk (b, c) VALUES('val1', now()); " +
-                               "ROLLBACK;";
+                    "CREATE TABLE table_with_pk (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
+                    "INSERT INTO table_with_pk (b, c) VALUES('val1', now()); " +
+                    "ROLLBACK;";
             TestHelper.execute(statement);
             expectedMessagesFromStream(stream, 0);
         }
@@ -232,22 +240,69 @@ public class ReplicationConnectionIT {
         try (ReplicationConnection connection = TestHelper.createForReplication("test", true)) {
             ReplicationStream stream = connection.startStreaming();
             String statements = "CREATE SCHEMA schema1;" +
-                                "CREATE SCHEMA schema2;" +
-                                "DROP TABLE IF EXISTS schema1.table;" +
-                                "DROP TABLE IF EXISTS schema2.table;" +
-                                "CREATE TABLE schema1.table (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
-                                "CREATE TABLE schema2.table (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
-                                "INSERT INTO schema1.table (b, c) VALUES('Value for schema1', now());" +
-                                "INSERT INTO schema2.table (b, c) VALUES('Value for schema2', now());";
+                    "CREATE SCHEMA schema2;" +
+                    "DROP TABLE IF EXISTS schema1.table;" +
+                    "DROP TABLE IF EXISTS schema2.table;" +
+                    "CREATE TABLE schema1.table (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
+                    "CREATE TABLE schema2.table (a SERIAL, b VARCHAR(30), c TIMESTAMP NOT NULL, PRIMARY KEY(a, c));" +
+                    "INSERT INTO schema1.table (b, c) VALUES('Value for schema1', now());" +
+                    "INSERT INTO schema2.table (b, c) VALUES('Value for schema2', now());";
             TestHelper.execute(statements);
             expectedMessagesFromStream(stream, 2);
         }
     }
 
-    private void flushLSN(ReplicationStream stream) {
+    @Test
+    @SkipWhenDecoderPluginNameIsNot(value = SkipWhenDecoderPluginNameIsNot.DecoderPluginName.PGOUTPUT, reason = "A pgoutput specific test streaming changes, stopping connector, making downtime changes, and verifying restart picks up changes")
+    public void testHowRelationMessagesAreReceived() throws Exception {
+        TestHelper.create().dropReplicationSlot("test");
+
+        try (ReplicationConnection connection = TestHelper.createForReplication("test", false)) {
+            connection.initConnection();
+
+            final String statements = "CREATE TABLE t0 (pk SERIAL, val INTEGER, PRIMARY KEY (pk));" +
+                    "ALTER TABLE t0 REPLICA IDENTITY FULL;" +
+                    "INSERT INTO t0 VALUES (1,1);" +
+                    "INSERT INTO t0 VALUES (2,1);" +
+                    "INSERT INTO t0 VALUES (3,1);" +
+                    "INSERT INTO t0 VALUES (4,1);" +
+                    "INSERT INTO t0 VALUES (5,1);" +
+                    "ALTER TABLE t0 ALTER COLUMN val TYPE BIGINT;" +
+                    "ALTER TABLE t0 ADD COLUMN val2 INTEGER;" +
+                    "INSERT INTO t0 VALUES (6,1,1);" +
+                    "DROP TABLE t0;" +
+                    "CREATE TABLE t0 (pk SERIAL, val3 BIGINT, PRIMARY KEY (pk));" +
+                    "ALTER TABLE t0 REPLICA IDENTITY FULL;" +
+                    "INSERT INTO t0 VALUES (7,2);" +
+                    "INSERT INTO t0 VALUES (8,2);";
+            TestHelper.execute(statements);
+
+            try (ReplicationStream stream = connection.startStreaming()) {
+                expectedMessagesFromStream(stream, 8);
+                flushLsn(stream);
+            }
+        }
+
+        TestHelper.execute(
+                "INSERT INTO t0 VALUES (9,2);" +
+                        "INSERT INTO t0 VALUES (10,2);" +
+                        "DROP TABLE t0;" +
+                        "CREATE TABLE t0 (pk SERIAL, val3 INT, PRIMARY KEY (pk));" +
+                        "ALTER TABLE t0 REPLICA IDENTITY FULL;" +
+                        "INSERT INTO t0 VALUES (11,1);");
+
+        try (ReplicationConnection connection = TestHelper.createForReplication("test", true)) {
+            try (ReplicationStream stream = connection.startStreaming()) {
+                expectedMessagesFromStream(stream, 3);
+            }
+        }
+    }
+
+    private void flushLsn(ReplicationStream stream) {
         try {
-            stream.flushLastReceivedLsn();
-        } catch (SQLException e) {
+            stream.flushLsn(stream.lastReceivedLsn());
+        }
+        catch (SQLException e) {
             throw new RuntimeException(e);
         }
     }
@@ -263,7 +318,8 @@ public class ReplicationConnectionIT {
                 if (streamProcessor != null) {
                     streamProcessor.accept(stream);
                 }
-            } catch (Throwable t) {
+            }
+            catch (Throwable t) {
                 // make sure we always drop the slot if something fails - note the connection was created with the drop on close
                 // set to false
                 try (PostgresConnection conn = TestHelper.create()) {
@@ -278,7 +334,8 @@ public class ReplicationConnectionIT {
     }
 
     private List<ReplicationMessage> expectedMessagesFromStream(ReplicationStream stream,
-                                                                int expectedMessages) throws Exception {
+                                                                int expectedMessages)
+            throws Exception {
         List<ReplicationMessage> actualMessages = new ArrayList<>();
 
         ExecutorService executorService = Executors.newSingleThreadExecutor();
@@ -286,9 +343,9 @@ public class ReplicationConnectionIT {
         Metronome metronome = Metronome.sleeper(Duration.ofMillis(50), Clock.SYSTEM);
         Future<?> result = executorService.submit(() -> {
             while (!Thread.interrupted()) {
-                for(;;) {
+                for (;;) {
                     List<ReplicationMessage> message = new ArrayList<>();
-                    stream.readPending(x -> message.add(x));
+                    stream.read(x -> message.add(x));
                     if (message.isEmpty()) {
                         break;
                     }
@@ -301,11 +358,12 @@ public class ReplicationConnectionIT {
         });
 
         try {
-            if (!latch.tryAcquire(expectedMessages, 10, TimeUnit.SECONDS)) {
+            if (!latch.tryAcquire(expectedMessages, TestHelper.waitTimeForRecords() * 5, TimeUnit.SECONDS)) {
                 result.cancel(true);
                 fail("expected " + expectedMessages + " messages, but read only " + actualMessages.size());
             }
-        } finally {
+        }
+        finally {
             executorService.shutdownNow();
         }
         return actualMessages;
@@ -313,7 +371,7 @@ public class ReplicationConnectionIT {
 
     private int insertSmallTestData() throws Exception {
         String statement = "INSERT INTO table_with_pk (b, c) VALUES('Backup and Restore', now());" +
-                           "INSERT INTO table_with_pk (b, c) VALUES('Tuning', now());";
+                "INSERT INTO table_with_pk (b, c) VALUES('Tuning', now());";
         TestHelper.execute(statement);
         // we expect 2 messages from the above
         return 2;
@@ -321,13 +379,13 @@ public class ReplicationConnectionIT {
 
     private int insertLargeTestData() throws Exception {
         String statement = "INSERT INTO table_with_pk (b, c) VALUES('Backup and Restore', now());" +
-                           "INSERT INTO table_with_pk (b, c) VALUES('Tuning', now());" +
-                           "DELETE FROM table_with_pk WHERE a < 3;" + // deletes 2 records
-                           "INSERT INTO table_without_pk (b,c) VALUES (1, 'Foo');" +
-                           "UPDATE table_without_pk SET c = 'Bar' WHERE c = 'Foo';" +
-                           "ALTER TABLE table_without_pk REPLICA IDENTITY FULL;" +
-                           "UPDATE table_without_pk SET c = 'Baz' WHERE c = 'Bar';" +
-                           "DELETE FROM table_without_pk WHERE c = 'Baz';";
+                "INSERT INTO table_with_pk (b, c) VALUES('Tuning', now());" +
+                "DELETE FROM table_with_pk WHERE a < 3;" + // deletes 2 records
+                "INSERT INTO table_without_pk (b,c) VALUES (1, 'Foo');" +
+                "UPDATE table_without_pk SET c = 'Bar' WHERE c = 'Foo';" +
+                "ALTER TABLE table_without_pk REPLICA IDENTITY FULL;" +
+                "UPDATE table_without_pk SET c = 'Baz' WHERE c = 'Bar';" +
+                "DELETE FROM table_without_pk WHERE c = 'Baz';";
 
         // Postgres WILL NOT fire any tuple changes (UPDATES or DELETES) for tables which don't have a PK by default EXCEPT
         // if that table has a REPLICA IDENTITY of FULL or INDEX.

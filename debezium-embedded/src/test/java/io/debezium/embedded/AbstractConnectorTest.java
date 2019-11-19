@@ -8,7 +8,9 @@ package io.debezium.embedded;
 import static org.fest.assertions.Assertions.assertThat;
 import static org.junit.Assert.fail;
 
+import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -27,6 +29,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
+import javax.management.InstanceNotFoundException;
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
+
 import org.apache.kafka.common.config.Config;
 import org.apache.kafka.common.config.ConfigValue;
 import org.apache.kafka.connect.data.Field;
@@ -44,6 +50,7 @@ import org.apache.kafka.connect.storage.Converter;
 import org.apache.kafka.connect.storage.FileOffsetBackingStore;
 import org.apache.kafka.connect.storage.OffsetStorageReaderImpl;
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.rules.TestRule;
@@ -57,8 +64,11 @@ import io.debezium.embedded.EmbeddedEngine.ConnectorCallback;
 import io.debezium.embedded.EmbeddedEngine.EmbeddedConfig;
 import io.debezium.function.BooleanConsumer;
 import io.debezium.junit.SkipTestRule;
+import io.debezium.junit.TestLogger;
 import io.debezium.relational.history.HistoryRecord;
+import io.debezium.util.Clock;
 import io.debezium.util.LoggingContext;
+import io.debezium.util.Metronome;
 import io.debezium.util.Testing;
 
 /**
@@ -78,6 +88,7 @@ public abstract class AbstractConnectorTest implements Testing {
     public TestRule skipTestRule = new SkipTestRule();
 
     protected static final Path OFFSET_STORE_PATH = Testing.Files.createTestingPath("file-connector-offsets.txt").toAbsolutePath();
+    protected static final String NO_MONITORED_TABLES_WARNING = "After applying blacklist/whitelist filters there are no tables to monitor, please check your configuration";
 
     private ExecutorService executor;
     protected EmbeddedEngine engine;
@@ -89,6 +100,9 @@ public abstract class AbstractConnectorTest implements Testing {
     private JsonConverter valueJsonConverter = new JsonConverter();
     private JsonDeserializer keyJsonDeserializer = new JsonDeserializer();
     private JsonDeserializer valueJsonDeserializer = new JsonDeserializer();
+
+    @Rule
+    public TestRule logTestName = new TestLogger(logger);
 
     @Before
     public final void initializeConnectorTestFramework() {
@@ -132,9 +146,10 @@ public abstract class AbstractConnectorTest implements Testing {
                 try {
                     // Oracle connector needs longer time to complete shutdown
                     engine.await(60, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
+                }
+                catch (InterruptedException e) {
                     logger.warn("Engine has not stopped on time");
-                    Thread.interrupted();
+                    Thread.currentThread().interrupt();
                 }
             }
             if (executor != null) {
@@ -144,9 +159,10 @@ public abstract class AbstractConnectorTest implements Testing {
                     while (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
                         // wait for completion ...
                     }
-                } catch (InterruptedException e) {
+                }
+                catch (InterruptedException e) {
                     logger.warn("Executor has not stopped on time");
-                    Thread.interrupted();
+                    Thread.currentThread().interrupt();
                 }
             }
             if (engine != null && engine.isRunning()) {
@@ -154,13 +170,17 @@ public abstract class AbstractConnectorTest implements Testing {
                     while (!engine.await(60, TimeUnit.SECONDS)) {
                         // Wait for connector to stop completely ...
                     }
-                } catch (InterruptedException e) {
+                }
+                catch (InterruptedException e) {
                     logger.warn("Connector has not stopped on time");
-                    Thread.interrupted();
+                    Thread.currentThread().interrupt();
                 }
             }
-            if (callback != null) callback.accept(engine != null ? engine.isRunning() : false);
-        } finally {
+            if (callback != null) {
+                callback.accept(engine != null ? engine.isRunning() : false);
+            }
+        }
+        finally {
             engine = null;
             executor = null;
         }
@@ -190,7 +210,8 @@ public abstract class AbstractConnectorTest implements Testing {
         return (success, msg, error) -> {
             if (success) {
                 logger.info(msg);
-            } else {
+            }
+            else {
                 logger.error(msg, error);
             }
         };
@@ -247,16 +268,19 @@ public abstract class AbstractConnectorTest implements Testing {
     protected void start(Class<? extends SourceConnector> connectorClass, Configuration connectorConfig,
                          CompletionCallback callback, Predicate<SourceRecord> isStopRecord) {
         Configuration config = Configuration.copy(connectorConfig)
-                                            .with(EmbeddedEngine.ENGINE_NAME, "testing-connector")
-                                            .with(EmbeddedEngine.CONNECTOR_CLASS, connectorClass.getName())
-                                            .with(StandaloneConfig.OFFSET_STORAGE_FILE_FILENAME_CONFIG, OFFSET_STORE_PATH)
-                                            .with(EmbeddedEngine.OFFSET_FLUSH_INTERVAL_MS, 0)
-                                            .build();
+                .with(EmbeddedEngine.ENGINE_NAME, "testing-connector")
+                .with(EmbeddedEngine.CONNECTOR_CLASS, connectorClass.getName())
+                .with(StandaloneConfig.OFFSET_STORAGE_FILE_FILENAME_CONFIG, OFFSET_STORE_PATH)
+                .with(EmbeddedEngine.OFFSET_FLUSH_INTERVAL_MS, 0)
+                .build();
         latch = new CountDownLatch(1);
         CompletionCallback wrapperCallback = (success, msg, error) -> {
             try {
-                if (callback != null) callback.handle(success, msg, error);
-            } finally {
+                if (callback != null) {
+                    callback.handle(success, msg, error);
+                }
+            }
+            finally {
                 if (!success) {
                     // we only unblock if there was an error; in all other cases we're unblocking when a task has been started
                     latch.countDown();
@@ -275,22 +299,26 @@ public abstract class AbstractConnectorTest implements Testing {
 
         // Create the connector ...
         engine = EmbeddedEngine.create()
-                               .using(config)
-                               .notifying((record) -> {
-                                   if (isStopRecord != null && isStopRecord.test(record)) {
-                                       logger.error("Stopping connector after record as requested");
-                                       throw new ConnectException("Stopping connector after record as requested");
-                                   }
-                                   try {
-                                       consumedLines.put(record);
-                                   } catch (InterruptedException e) {
-                                       Thread.interrupted();
-                                   }
-                               })
-                               .using(this.getClass().getClassLoader())
-                               .using(wrapperCallback)
-                               .using(connectorCallback)
-                               .build();
+                .using(config)
+                .notifying((record) -> {
+                    if (isStopRecord != null && isStopRecord.test(record)) {
+                        logger.error("Stopping connector after record as requested");
+                        throw new ConnectException("Stopping connector after record as requested");
+                    }
+                    // Test stopped the connector, remaining records are ignored
+                    if (!engine.isRunning() || Thread.currentThread().isInterrupted()) {
+                        return;
+                    }
+                    while (!consumedLines.offer(record)) {
+                        if (!engine.isRunning() || Thread.currentThread().isInterrupted()) {
+                            return;
+                        }
+                    }
+                })
+                .using(this.getClass().getClassLoader())
+                .using(wrapperCallback)
+                .using(connectorCallback)
+                .build();
 
         // Submit the connector for asynchronous execution ...
         assertThat(executor).isNull();
@@ -304,7 +332,8 @@ public abstract class AbstractConnectorTest implements Testing {
                 // maybe it takes more time to start up, so just log a warning and continue
                 logger.warn("The connector did not finish starting its task(s) or complete in the expected amount of time");
             }
-        } catch (InterruptedException e) {
+        }
+        catch (InterruptedException e) {
             if (Thread.interrupted()) {
                 fail("Interrupted while waiting for engine startup");
             }
@@ -319,7 +348,9 @@ public abstract class AbstractConnectorTest implements Testing {
      * @param unit the time unit; may not be null
      */
     protected void setConsumeTimeout(long timeout, TimeUnit unit) {
-        if (timeout < 0) throw new IllegalArgumentException("The timeout may not be negative");
+        if (timeout < 0) {
+            throw new IllegalArgumentException("The timeout may not be negative");
+        }
         pollTimeoutInMs = unit.toMillis(timeout);
     }
 
@@ -352,13 +383,13 @@ public abstract class AbstractConnectorTest implements Testing {
      * till the waiting is terminated.
      *
      * @param numberOfRecords the number of records that should be consumed
+     * @param breakAfterNulls the number of allowed runs when no records are received
      * @param recordConsumer the function that should be called with each consumed record
      * @return the actual number of records that were consumed
      * @throws InterruptedException if the thread was interrupted while waiting for a record to be returned
      */
-    protected int consumeRecords(int numberOfRecords, Consumer<SourceRecord> recordConsumer) throws InterruptedException {
+    protected int consumeRecords(int numberOfRecords, int breakAfterNulls, Consumer<SourceRecord> recordConsumer) throws InterruptedException {
         int recordsConsumed = 0;
-        final int BREAK_AFTER_NULLS = 3;
         int nullReturn = 0;
         while (recordsConsumed < numberOfRecords) {
             SourceRecord record = consumedLines.poll(pollTimeoutInMs, TimeUnit.MILLISECONDS);
@@ -372,18 +403,49 @@ public abstract class AbstractConnectorTest implements Testing {
                     Testing.debug("Consumed record " + recordsConsumed + " / " + numberOfRecords + " ("
                             + (numberOfRecords - recordsConsumed) + " more)");
                     debug(record);
-                } else if (Testing.Print.isEnabled()) {
+                }
+                else if (Testing.Print.isEnabled()) {
                     Testing.print("Consumed record " + recordsConsumed + " / " + numberOfRecords + " ("
                             + (numberOfRecords - recordsConsumed) + " more)");
                     print(record);
                 }
-            } else {
-                if (++nullReturn >= BREAK_AFTER_NULLS) {
+            }
+            else {
+                if (++nullReturn >= breakAfterNulls) {
                     return recordsConsumed;
                 }
             }
         }
         return recordsConsumed;
+    }
+
+    /**
+     * Try to consume the specified number of records from the connector, calling the given function for each, and return the
+     * actual number of records that were consumed.
+     * For slower connectors it is possible to receive no records form the connector at most 3 times in a row
+     * till the waiting is terminated.
+     *
+     * @param numberOfRecords the number of records that should be consumed
+     * @param recordConsumer the function that should be called with each consumed record
+     * @return the actual number of records that were consumed
+     * @throws InterruptedException if the thread was interrupted while waiting for a record to be returned
+     */
+    protected int consumeRecords(int numberOfRecords, Consumer<SourceRecord> recordConsumer) throws InterruptedException {
+        return consumeRecords(numberOfRecords, 3, recordConsumer);
+    }
+
+    /**
+     * Try to consume and capture exactly the specified number of records from the connector.
+     *
+     * @param numRecords the number of records that should be consumed
+     * @param breakAfterNulls how many times to wait when no records arrive from the connector
+     * @return the collector into which the records were captured; never null
+     * @throws InterruptedException if the thread was interrupted while waiting for a record to be returned
+     */
+    protected SourceRecords consumeRecordsByTopic(int numRecords, int breakAfterNulls) throws InterruptedException {
+        SourceRecords records = new SourceRecords();
+        consumeRecords(numRecords, breakAfterNulls, records::add);
+        return records;
     }
 
     /**
@@ -408,7 +470,9 @@ public abstract class AbstractConnectorTest implements Testing {
             records.add(record);
             recordsByTopic.computeIfAbsent(record.topic(), (topicName) -> new ArrayList<SourceRecord>()).add(record);
             String dbName = getAffectedDatabase(record);
-            if (dbName != null) ddlRecordsByDbName.computeIfAbsent(dbName, key -> new ArrayList<>()).add(record);
+            if (dbName != null) {
+                ddlRecordsByDbName.computeIfAbsent(dbName, key -> new ArrayList<>()).add(record);
+            }
         }
 
         protected String getAffectedDatabase(SourceRecord record) {
@@ -509,7 +573,9 @@ public abstract class AbstractConnectorTest implements Testing {
         long now = System.currentTimeMillis();
         long stop = now + unit.toMillis(timeout);
         while (System.currentTimeMillis() < stop) {
-            if (!consumedLines.isEmpty()) break;
+            if (!consumedLines.isEmpty()) {
+                break;
+            }
         }
         return consumedLines.isEmpty() ? false : true;
     }
@@ -525,7 +591,7 @@ public abstract class AbstractConnectorTest implements Testing {
      * Assert that the connector is NOT currently running.
      */
     protected void assertConnectorNotRunning() {
-        assertThat(engine.isRunning()).isFalse();
+        assertThat(engine != null && engine.isRunning()).isFalse();
     }
 
     /**
@@ -567,15 +633,15 @@ public abstract class AbstractConnectorTest implements Testing {
         VerifyRecord.isValidTombstone(record);
     }
 
-    protected void assertOffset(SourceRecord record, Map<String,?> expectedOffset) {
-        Map<String,?> offset = record.sourceOffset();
+    protected void assertOffset(SourceRecord record, Map<String, ?> expectedOffset) {
+        Map<String, ?> offset = record.sourceOffset();
         assertThat(offset).isEqualTo(expectedOffset);
     }
 
     protected void assertOffset(SourceRecord record, String offsetField, Object expectedValue) {
-        Map<String,?> offset = record.sourceOffset();
+        Map<String, ?> offset = record.sourceOffset();
         Object value = offset.get(offsetField);
-        assertSameValue(value,expectedValue);
+        assertSameValue(value, expectedValue);
     }
 
     protected void assertValueField(SourceRecord record, String fieldPath, Object expectedValue) {
@@ -685,9 +751,9 @@ public abstract class AbstractConnectorTest implements Testing {
     protected <T> Map<Map<String, T>, Map<String, Object>> readLastCommittedOffsets(Configuration config,
                                                                                     Collection<Map<String, T>> partitions) {
         config = config.edit().with(EmbeddedEngine.ENGINE_NAME, "testing-connector")
-                       .with(StandaloneConfig.OFFSET_STORAGE_FILE_FILENAME_CONFIG, OFFSET_STORE_PATH)
-                       .with(EmbeddedEngine.OFFSET_FLUSH_INTERVAL_MS, 0)
-                       .build();
+                .with(StandaloneConfig.OFFSET_STORAGE_FILE_FILENAME_CONFIG, OFFSET_STORE_PATH)
+                .with(EmbeddedEngine.OFFSET_FLUSH_INTERVAL_MS, 0)
+                .build();
 
         final String engineName = config.getString(EmbeddedEngine.ENGINE_NAME);
         Converter keyConverter = config.getInstance(EmbeddedEngine.INTERNAL_KEY_CONVERTER_CLASS, Converter.class);
@@ -699,7 +765,7 @@ public abstract class AbstractConnectorTest implements Testing {
             valueConverterConfig = config.edit().with(EmbeddedEngine.INTERNAL_VALUE_CONVERTER_CLASS + ".schemas.enable", false).build();
         }
         valueConverter.configure(valueConverterConfig.subset(EmbeddedEngine.INTERNAL_VALUE_CONVERTER_CLASS.name() + ".", true).asMap(),
-                                 false);
+                false);
 
         // Create the worker config, adding extra fields that are required for validation of a worker config
         // but that are not used within the embedded engine (since the source records are never serialized) ...
@@ -714,8 +780,65 @@ public abstract class AbstractConnectorTest implements Testing {
         try {
             OffsetStorageReaderImpl offsetReader = new OffsetStorageReaderImpl(offsetStore, engineName, keyConverter, valueConverter);
             return offsetReader.offsets(partitions);
-        } finally {
+        }
+        finally {
             offsetStore.stop();
+        }
+    }
+
+    public static void waitForSnapshotToBeCompleted(String connector, String server) throws InterruptedException {
+        int waitForSeconds = 60;
+        final MBeanServer mbeanServer = ManagementFactory.getPlatformMBeanServer();
+        final Metronome metronome = Metronome.sleeper(Duration.ofSeconds(1), Clock.system());
+
+        while (true) {
+            if (waitForSeconds-- <= 0) {
+                Assert.fail("Snapshot was not completed on time");
+            }
+            try {
+                final boolean completed = (boolean) mbeanServer
+                        .getAttribute(new ObjectName("debezium." + connector + ":type=connector-metrics,context=snapshot,server=" + server), "SnapshotCompleted");
+                if (completed) {
+                    break;
+                }
+            }
+            catch (InstanceNotFoundException e) {
+                Testing.print("Metrics has not started yet");
+            }
+            catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+            metronome.pause();
+        }
+    }
+
+    public static void waitForStreamingRunning(String connector, String server) throws InterruptedException {
+        waitForStreamingRunning(connector, server, "streaming");
+    }
+
+    public static void waitForStreamingRunning(String connector, String server, String contextName) throws InterruptedException {
+        int waitForSeconds = 60;
+        final MBeanServer mbeanServer = ManagementFactory.getPlatformMBeanServer();
+        final Metronome metronome = Metronome.sleeper(Duration.ofSeconds(1), Clock.system());
+
+        while (true) {
+            if (waitForSeconds-- <= 0) {
+                Assert.fail("Streaming was not started on time");
+            }
+            try {
+                final boolean completed = (boolean) mbeanServer
+                        .getAttribute(new ObjectName("debezium." + connector + ":type=connector-metrics,context=" + contextName + ",server=" + server), "Connected");
+                if (completed) {
+                    break;
+                }
+            }
+            catch (InstanceNotFoundException e) {
+                Testing.print("Metrics has not started yet");
+            }
+            catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+            metronome.pause();
         }
     }
 }

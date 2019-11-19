@@ -43,7 +43,6 @@ import io.debezium.util.Strings;
 
 /**
  * An immutable definition of a field that make appear within a {@link Configuration} instance.
- * 
  * @author Randall Hauch
  */
 @Immutable
@@ -53,7 +52,6 @@ public final class Field {
 
     /**
      * Create a set of fields.
-     * 
      * @param fields the fields to include
      * @return the field set; never null
      */
@@ -81,13 +79,13 @@ public final class Field {
             });
             this.fieldsByName = Collections.unmodifiableMap(all);
         }
-        
+
         /**
          * Get the field with the given {Field#name() name}.
          * @param name the name of the field
          * @return the field, or {@code null} if there is no field with the given name
          */
-        public Field fieldWithName( String name ) {
+        public Field fieldWithName(String name) {
             return fieldsByName.get(name);
         }
 
@@ -98,7 +96,6 @@ public final class Field {
 
         /**
          * Get the fields in this set as an array.
-         * 
          * @return the array of fields; never null
          */
         public Field[] asArray() {
@@ -107,56 +104,58 @@ public final class Field {
 
         /**
          * Call the supplied function for each of this set's fields that have non-existent dependents.
-         * 
          * @param consumer the function; may not be null
          */
         public void forEachMissingDependent(Consumer<String> consumer) {
             fieldsByName.values().stream()
-                        .map(Field::dependents)
-                        .flatMap(Collection::stream)
-                        .filter(Predicates.not(fieldsByName::containsKey))
-                        .forEach(consumer);
+                    .map(Field::dependents)
+                    .flatMap(Collection::stream)
+                    .filter(Predicates.not(fieldsByName::containsKey))
+                    .forEach(consumer);
         }
 
         /**
          * Call the supplied function for each of this set's fields that are not included as dependents in other
          * fields.
-         * 
          * @param consumer the function; may not be null
          */
         public void forEachTopLevelField(Consumer<Field> consumer) {
             Collection<String> namesOfDependents = fieldsByName.values().stream()
-                                                               .map(Field::dependents)
-                                                               .flatMap(Collection::stream)
-                                                               .collect(Collectors.toSet());
+                    .map(Field::dependents)
+                    .flatMap(Collection::stream)
+                    .collect(Collectors.toSet());
             fieldsByName.values().stream().filter(f -> !namesOfDependents.contains(f.name())).forEach(consumer);
         }
 
         /**
          * Get a new set that contains the fields in this set and those supplied.
-         * 
          * @param fields the fields to include with this set's fields
          * @return the new set; never null
          */
         public Set with(Field... fields) {
-            if (fields.length == 0) return this;
+            if (fields.length == 0) {
+                return this;
+            }
             LinkedHashSet<Field> all = new LinkedHashSet<>(this.fieldsByName.values());
             for (Field f : fields) {
-                if (f != null) all.add(f);
+                if (f != null) {
+                    all.add(f);
+                }
             }
             return new Set(all);
         }
 
         /**
          * Get a new set that contains the fields in this set and those supplied.
-         * 
          * @param fields the fields to include with this set's fields
          * @return the new set; never null
          */
         public Set with(Iterable<Field> fields) {
             LinkedHashSet<Field> all = new LinkedHashSet<>(this.fieldsByName.values());
             fields.forEach(field -> {
-                if (field != null) all.add(field);
+                if (field != null) {
+                    all.add(field);
+                }
             });
             return new Set(all);
         }
@@ -169,7 +168,6 @@ public final class Field {
     public static interface ValidationOutput {
         /**
          * Accept a problem with the given value for the field.
-         * 
          * @param field the field with the value; may not be null
          * @param value the value that is not valid
          * @param problemMessage the message describing the problem; may not be null
@@ -185,7 +183,7 @@ public final class Field {
 
         /**
          * Validate the supplied value for the field, and report any problems to the designated consumer.
-         * 
+         *
          * @param config the configuration containing the field to be validated; may not be null
          * @param field the {@link Field} being validated; never null
          * @param problems the consumer to be called with each problem; never null
@@ -195,12 +193,14 @@ public final class Field {
 
         /**
          * Obtain a new {@link Validator} object that validates using this validator and the supplied validator.
-         * 
+         *
          * @param other the validation function to call after this
          * @return the new validator, or this validator if {@code other} is {@code null} or equal to {@code this}
          */
         default Validator and(Validator other) {
-            if (other == null || other == this) return this;
+            if (other == null || other == this) {
+                return this;
+            }
             return (config, field, problems) -> {
                 return validate(config, field, problems) + other.validate(config, field, problems);
             };
@@ -215,7 +215,6 @@ public final class Field {
     public static interface Recommender {
         /**
          * Return a set of recommended (and valid) values for the field given the current configuration values.
-         * 
          * @param field the field for which the recommended values are to be found; may not be null
          * @param config the configuration; may not be null
          * @return the list of valid values
@@ -224,7 +223,6 @@ public final class Field {
 
         /**
          * Set the visibility of the field given the current configuration values.
-         * 
          * @param field the field; may not be null
          * @param config the configuration; may not be null
          * @return {@code true} if the field is to be visible, or {@code false} otherwise
@@ -234,7 +232,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name.
-     * 
      * @param name the name of the field; may not be null
      * @return the field; never null
      */
@@ -255,7 +252,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name.
-     * 
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @return the field; never null
@@ -266,7 +262,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name and description.
-     * 
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @param description the description
@@ -278,7 +273,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name, description, and default value.
-     * 
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @param description the description
@@ -291,7 +285,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name, description, and default value.
-     * 
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @param description the description
@@ -304,7 +297,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name, description, and default value.
-     * 
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @param description the description
@@ -317,7 +309,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name, description, and default value.
-     * 
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @param description the description
@@ -330,7 +321,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name, description, and default value.
-     * 
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @param description the description
@@ -343,7 +333,7 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name, description, and default value.
-     * 
+     *
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @param description the description
@@ -357,7 +347,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name, description, and default value.
-     * 
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @param description the description
@@ -371,7 +360,6 @@ public final class Field {
 
     /**
      * Create an immutable {@link Field} instance with the given property name, description, and default value.
-     * 
      * @param name the name of the field; may not be null
      * @param displayName the display name of the field; may not be null
      * @param description the description
@@ -385,7 +373,6 @@ public final class Field {
 
     /**
      * Add this field to the given configuration definition.
-     * 
      * @param configDef the definition of the configuration; may be null if none of the fields are to be added
      * @param groupName the name of the group; may be null
      * @param fields the fields to be added as a group to the definition of the configuration
@@ -397,13 +384,14 @@ public final class Field {
                 for (int i = 0; i != fields.length; ++i) {
                     Field f = fields[i];
                     configDef.define(f.name(), f.type(), f.defaultValue(), null, f.importance(), f.description(),
-                                     groupName, i + 1, f.width(), f.displayName(), f.dependents(), null);
+                            groupName, i + 1, f.width(), f.displayName(), f.dependents(), null);
                 }
-            } else {
+            }
+            else {
                 for (int i = 0; i != fields.length; ++i) {
                     Field f = fields[i];
                     configDef.define(f.name(), f.type(), f.defaultValue(), null, f.importance(), f.description(),
-                                     null, 1, f.width(), f.displayName(), f.dependents(), null);
+                            null, 1, f.width(), f.displayName(), f.dependents(), null);
                 }
             }
         }
@@ -422,13 +410,13 @@ public final class Field {
     private final Recommender recommender;
 
     protected Field(String name, String displayName, Type type, Width width, String description, Importance importance,
-            Supplier<Object> defaultValueGenerator, Validator validator) {
+                    Supplier<Object> defaultValueGenerator, Validator validator) {
         this(name, displayName, type, width, description, importance, null, defaultValueGenerator, validator, null);
     }
 
     protected Field(String name, String displayName, Type type, Width width, String description, Importance importance,
-            List<String> dependents, Supplier<Object> defaultValueGenerator, Validator validator,
-            Recommender recommender) {
+                    List<String> dependents, Supplier<Object> defaultValueGenerator, Validator validator,
+                    Recommender recommender) {
         Objects.requireNonNull(name, "The field name is required");
         this.name = name;
         this.displayName = displayName;
@@ -445,7 +433,6 @@ public final class Field {
 
     /**
      * Get the name of the field.
-     * 
      * @return the name; never null
      */
     public String name() {
@@ -454,7 +441,6 @@ public final class Field {
 
     /**
      * Get the default value of the field.
-     * 
      * @return the default value, or {@code null} if there is no default value
      */
     public Object defaultValue() {
@@ -463,7 +449,6 @@ public final class Field {
 
     /**
      * Get the string representation of the default value of the field.
-     * 
      * @return the default value, or {@code null} if there is no default value
      */
     public String defaultValueAsString() {
@@ -473,7 +458,6 @@ public final class Field {
 
     /**
      * Get the description of the field.
-     * 
      * @return the description; never null
      */
     public String description() {
@@ -482,7 +466,6 @@ public final class Field {
 
     /**
      * Get the display name of the field.
-     * 
      * @return the display name; never null
      */
     public String displayName() {
@@ -491,7 +474,6 @@ public final class Field {
 
     /**
      * Get the width of this field.
-     * 
      * @return the width; never null
      */
     public Width width() {
@@ -500,7 +482,6 @@ public final class Field {
 
     /**
      * Get the type of this field.
-     * 
      * @return the type; never null
      */
     public Type type() {
@@ -509,7 +490,6 @@ public final class Field {
 
     /**
      * Get the importance of this field.
-     * 
      * @return the importance; never null
      */
     public Importance importance() {
@@ -518,7 +498,6 @@ public final class Field {
 
     /**
      * Get the names of the fields that are or may be dependent upon this field.
-     * 
      * @return the list of dependents; never null but possibly empty
      */
     public List<String> dependents() {
@@ -527,7 +506,6 @@ public final class Field {
 
     /**
      * Get the validator for this field.
-     * 
      * @return the validator; may be null if there is no validator
      */
     public Validator validator() {
@@ -536,7 +514,6 @@ public final class Field {
 
     /**
      * Get the {@link Recommender} for this field.
-     * 
      * @return the recommender; may be null if there is no recommender
      */
     public Recommender recommender() {
@@ -545,7 +522,6 @@ public final class Field {
 
     /**
      * Validate the supplied value for this field, and report any problems to the designated consumer.
-     * 
      * @param config the field values keyed by their name; may not be null
      * @param problems the consumer to be called with each problem; never null
      * @return {@code true} if the value is considered valid, or {@code false} if it is not valid
@@ -553,19 +529,22 @@ public final class Field {
     public boolean validate(Configuration config, ValidationOutput problems) {
         Validator typeValidator = validatorForType(type);
         int errors = 0;
-        if (typeValidator != null) errors += typeValidator.validate(config, this, problems);
-        if (validator != null) errors += validator.validate(config, this, problems);
+        if (typeValidator != null) {
+            errors += typeValidator.validate(config, this, problems);
+        }
+        if (validator != null) {
+            errors += validator.validate(config, this, problems);
+        }
         return errors == 0;
     }
 
     /**
      * Validate this field in the supplied configuration, updating the {@link ConfigValue} for the field with the results.
-     * 
      * @param config the configuration to be validated; may not be null
      * @param fieldSupplier the supplier for dependent fields by name; may not be null
      * @param results the set of configuration results keyed by field name; may not be null
      */
-    protected void validate(Configuration config, Function<String,Field> fieldSupplier, Map<String, ConfigValue> results) {
+    protected void validate(Configuration config, Function<String, Field> fieldSupplier, Map<String, ConfigValue> results) {
         // First, merge any new recommended values ...
         ConfigValue value = results.computeIfAbsent(this.name(), n -> new ConfigValue(n));
 
@@ -587,15 +566,16 @@ public final class Field {
                     newRecommendations.retainAll(previousRecommendations);
                 }
                 value.recommendedValues(newRecommendations);
-            } catch (ConfigException e) {
+            }
+            catch (ConfigException e) {
                 value.addErrorMessage(e.getMessage());
             }
         }
-        
+
         // Do the same for any dependents ...
-        dependents.forEach(name->{
+        dependents.forEach(name -> {
             Field dependentField = fieldSupplier.apply(name);
-            if ( dependentField != null ) {
+            if (dependentField != null) {
                 dependentField.validate(config, fieldSupplier, results);
             }
         });
@@ -603,7 +583,6 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given description.
-     * 
      * @param description the new description for the new field
      * @return the new field; never null
      */
@@ -614,7 +593,7 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given display name.
-     * 
+     *
      * @param displayName the new display name for the field
      * @return the new field; never null
      */
@@ -625,7 +604,6 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given width.
-     * 
      * @param width the new width for the field
      * @return the new field; never null
      */
@@ -636,7 +614,6 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given type.
-     * 
      * @param type the new type for the field
      * @return the new field; never null
      */
@@ -650,12 +627,11 @@ public final class Field {
      * {@link org.apache.kafka.connect.data.Schema.Type#STRING}, a {@link #withRecommender(Recommender) recommender}
      * that returns a list of {@link Enum#name() Enum names} as valid values, and a validator that verifies values are valid
      * enumeration names.
-     * 
      * @param enumType the enumeration type for the field
      * @return the new field; never null
      */
     public <T extends Enum<T>> Field withEnum(Class<T> enumType) {
-        return withEnum(enumType,null);
+        return withEnum(enumType, null);
     }
 
     /**
@@ -663,7 +639,6 @@ public final class Field {
      * {@link org.apache.kafka.connect.data.Schema.Type#STRING}, a {@link #withRecommender(Recommender) recommender}
      * that returns a list of {@link Enum#name() Enum names} as valid values, and a validator that verifies values are valid
      * enumeration names.
-     * 
      * @param enumType the enumeration type for the field
      * @param defaultOption the default enumeration value; may be null
      * @return the new field; never null
@@ -672,9 +647,9 @@ public final class Field {
         EnumRecommender<T> recommendator = new EnumRecommender<>(enumType);
         Field result = withType(Type.STRING).withRecommender(recommendator).withValidation(recommendator);
         // Not all enums support EnumeratedValue yet
-        if ( defaultOption != null ) {
+        if (defaultOption != null) {
             if (defaultOption instanceof EnumeratedValue) {
-                result = result.withDefault(((EnumeratedValue)defaultOption).getValue());
+                result = result.withDefault(((EnumeratedValue) defaultOption).getValue());
             }
             else {
                 result = result.withDefault(defaultOption.name().toLowerCase());
@@ -685,7 +660,6 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given importance.
-     * 
      * @param importance the new importance for the field
      * @return the new field; never null
      */
@@ -696,7 +670,6 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given display name.
-     * 
      * @param dependents the names of the fields that depend on this field
      * @return the new field; never null
      */
@@ -707,7 +680,6 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given default value.
-     * 
      * @param defaultValue the new default value for the new field
      * @return the new field; never null
      */
@@ -718,7 +690,7 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given default value.
-     * 
+     *
      * @param defaultValue the new default value for the new field
      * @return the new field; never null
      */
@@ -729,7 +701,6 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given default value.
-     * 
      * @param defaultValue the new default value for the new field
      * @return the new field; never null
      */
@@ -740,7 +711,7 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given default value.
-     * 
+     *
      * @param defaultValue the new default value for the new field
      * @return the new field; never null
      */
@@ -751,7 +722,7 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given default value.
-     * 
+     *
      * @param defaultValueGenerator the supplier for the new default value for the new field, called whenever a default value
      *            is needed
      * @return the new field; never null
@@ -763,7 +734,7 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given default value.
-     * 
+     *
      * @param defaultValueGenerator the supplier for the new default value for the new field, called whenever a default value
      *            is needed
      * @return the new field; never null
@@ -775,7 +746,7 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given default value.
-     * 
+     *
      * @param defaultValueGenerator the supplier for the new default value for the new field, called whenever a default value
      *            is needed
      * @return the new field; never null
@@ -787,7 +758,7 @@ public final class Field {
 
     /**
      * Create and return a new Field instance that is a copy of this field but with the given recommender.
-     * 
+     *
      * @param recommender the recommender; may be null
      * @return the new field; never null
      */
@@ -795,14 +766,14 @@ public final class Field {
         return new Field(name(), displayName(), type(), width, description(), importance(), dependents,
                 defaultValueGenerator, validator, recommender);
     }
-    
+
     public Field withInvisibleRecommender() {
         return withRecommender(new InvisibleRecommender());
     }
 
     /**
      * Create and return a new Field instance that is a copy of this field but that uses no validation.
-     * 
+     *
      * @return the new field; never null
      */
     public Field withNoValidation() {
@@ -813,14 +784,16 @@ public final class Field {
     /**
      * Create and return a new Field instance that is a copy of this field but that in addition to {@link #validator() existing
      * validation} the supplied validation function(s) are also used.
-     * 
+     *
      * @param validators the additional validation function(s); may be null
      * @return the new field; never null
      */
     public Field withValidation(Validator... validators) {
         Validator actualValidator = validator;
         for (Validator validator : validators) {
-            if (validator != null) actualValidator = validator.and(actualValidator);
+            if (validator != null) {
+                actualValidator = validator.and(actualValidator);
+            }
         }
         return new Field(name(), displayName(), type(), width(), description(), importance(), dependents,
                 defaultValueGenerator, actualValidator, recommender);
@@ -833,7 +806,9 @@ public final class Field {
 
     @Override
     public boolean equals(Object obj) {
-        if (obj == this) return true;
+        if (obj == this) {
+            return true;
+        }
         if (obj instanceof Field) {
             Field that = (Field) obj;
             return this.name().equals(that.name());
@@ -870,7 +845,7 @@ public final class Field {
 
         /**
          * A validator that checks both the upper and lower bound.
-         * 
+         *
          * @param min the minimum acceptable value; may not be null
          * @param max the maximum acceptable value; may not be null
          * @return the validator; never null
@@ -898,23 +873,31 @@ public final class Field {
         }
 
         public void ensureValid(String name, Object o) {
-            if (o == null)
+            if (o == null) {
                 throw new ConfigException(name, o, "Value must be non-null");
+            }
             Number n = (Number) o;
-            if (min != null && n.doubleValue() < min.doubleValue())
+            if (min != null && n.doubleValue() < min.doubleValue()) {
                 throw new ConfigException(name, o, "Value must be at least " + min);
-            if (max != null && n.doubleValue() > max.doubleValue())
+            }
+            if (max != null && n.doubleValue() > max.doubleValue()) {
                 throw new ConfigException(name, o, "Value must be no more than " + max);
+            }
         }
 
         @Override
         public String toString() {
-            if (min == null)
+            if (min == null) {
                 return "[...," + max + "]";
-            else if (max == null)
-                return "[" + min + ",...]";
-            else
-                return "[" + min + ",...," + max + "]";
+            }
+            else {
+                if (max == null) {
+                    return "[" + min + ",...]";
+                }
+                else {
+                    return "[" + min + ",...," + max + "]";
+                }
+            }
         }
     }
 
@@ -963,15 +946,15 @@ public final class Field {
             // Not all enums support EnumeratedValue yet
             if (Arrays.asList(enumType.getInterfaces()).contains(EnumeratedValue.class)) {
                 this.literals = Arrays.stream(enumType.getEnumConstants())
-                                       .map(x -> ((EnumeratedValue)x).getValue())
-                                       .map(String::toLowerCase)
-                                       .collect(Collectors.toSet());
+                        .map(x -> ((EnumeratedValue) x).getValue())
+                        .map(String::toLowerCase)
+                        .collect(Collectors.toSet());
             }
             else {
                 this.literals = Arrays.stream(enumType.getEnumConstants())
-                                       .map(Enum::name)
-                                       .map(String::toLowerCase)
-                                       .collect(Collectors.toSet());
+                        .map(Enum::name)
+                        .map(String::toLowerCase)
+                        .collect(Collectors.toSet());
             }
             this.validValues = Collections.unmodifiableList(new ArrayList<>(this.literals));
             this.literalsStr = Strings.join(", ", validValues);
@@ -1002,7 +985,6 @@ public final class Field {
             return 0;
         }
     }
-
 
     /**
      * A {@link Recommender} that will look at several fields that are deemed to be exclusive, such that when the first of
@@ -1052,7 +1034,8 @@ public final class Field {
         if (value != null) {
             try {
                 Strings.setOfRegex(value, Pattern.CASE_INSENSITIVE);
-            } catch (PatternSyntaxException e) {
+            }
+            catch (PatternSyntaxException e) {
                 problems.accept(field, value, "A comma-separated list of valid regular expressions is expected, but " + e.getMessage());
                 ++errors;
             }
@@ -1066,7 +1049,8 @@ public final class Field {
         if (value != null) {
             try {
                 Pattern.compile(value, Pattern.CASE_INSENSITIVE);
-            } catch (PatternSyntaxException e) {
+            }
+            catch (PatternSyntaxException e) {
                 problems.accept(field, value, "A valid regular expressions is expected, but " + e.getMessage());
                 ++errors;
             }
@@ -1076,14 +1060,18 @@ public final class Field {
 
     public static int isClassName(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null || SourceVersion.isName(value)) return 0;
+        if (value == null || SourceVersion.isName(value)) {
+            return 0;
+        }
         problems.accept(field, value, "A Java class name is expected");
         return 1;
     }
 
     public static int isRequired(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value != null && value.trim().length() > 0) return 0;
+        if (value != null && value.trim().length() > 0) {
+            return 0;
+        }
         problems.accept(field, value, "A value is required");
         return 1;
     }
@@ -1097,18 +1085,22 @@ public final class Field {
         String value = config.getString(field);
         if (value == null ||
                 value.trim().equalsIgnoreCase(Boolean.TRUE.toString()) ||
-                value.trim().equalsIgnoreCase(Boolean.FALSE.toString()))
+                value.trim().equalsIgnoreCase(Boolean.FALSE.toString())) {
             return 0;
+        }
         problems.accept(field, value, "Either 'true' or 'false' is expected");
         return 1;
     }
 
     public static int isInteger(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
         try {
             Integer.parseInt(value);
-        } catch (NumberFormatException e) {
+        }
+        catch (NumberFormatException e) {
             problems.accept(field, value, "An integer is expected");
             return 1;
         }
@@ -1117,30 +1109,45 @@ public final class Field {
 
     public static int isPositiveInteger(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
         try {
-            if (Integer.parseInt(value) > 0) return 0;
-        } catch (Throwable e) {}
+            if (Integer.parseInt(value) > 0) {
+                return 0;
+            }
+        }
+        catch (Throwable e) {
+        }
         problems.accept(field, value, "A positive integer is expected");
         return 1;
     }
 
     public static int isNonNegativeInteger(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
         try {
-            if (Integer.parseInt(value) >= 0) return 0;
-        } catch (Throwable e) {}
+            if (Integer.parseInt(value) >= 0) {
+                return 0;
+            }
+        }
+        catch (Throwable e) {
+        }
         problems.accept(field, value, "An non-negative integer is expected");
         return 1;
     }
 
     public static int isLong(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
         try {
             Long.parseLong(value);
-        } catch (NumberFormatException e) {
+        }
+        catch (NumberFormatException e) {
             problems.accept(field, value, "A long value is expected");
             return 1;
         }
@@ -1149,30 +1156,45 @@ public final class Field {
 
     public static int isPositiveLong(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
         try {
-            if (Long.parseLong(value) > 0) return 0;
-        } catch (Throwable e) {}
+            if (Long.parseLong(value) > 0) {
+                return 0;
+            }
+        }
+        catch (Throwable e) {
+        }
         problems.accept(field, value, "A positive long value is expected");
         return 1;
     }
 
     public static int isNonNegativeLong(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
         try {
-            if (Long.parseLong(value) >= 0) return 0;
-        } catch (Throwable e) {}
+            if (Long.parseLong(value) >= 0) {
+                return 0;
+            }
+        }
+        catch (Throwable e) {
+        }
         problems.accept(field, value, "A non-negative long value is expected");
         return 1;
     }
 
     public static int isShort(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
         try {
             Short.parseShort(value);
-        } catch (NumberFormatException e) {
+        }
+        catch (NumberFormatException e) {
             problems.accept(field, value, "A short value is expected");
             return 1;
         }
@@ -1181,10 +1203,13 @@ public final class Field {
 
     public static int isDouble(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
         try {
             Double.parseDouble(value);
-        } catch (NumberFormatException e) {
+        }
+        catch (NumberFormatException e) {
             problems.accept(field, value, "A double value is expected");
             return 1;
         }
@@ -1193,10 +1218,13 @@ public final class Field {
 
     public static int isZoneOffset(Configuration config, Field field, ValidationOutput problems) {
         String value = config.getString(field);
-        if (value == null) return 0;
+        if (value == null) {
+            return 0;
+        }
         try {
             ZoneOffset.of(value);
-        } catch (DateTimeException e) {
+        }
+        catch (DateTimeException e) {
             problems.accept(field, value, "A zone offset string representation is expected");
             return 1;
         }

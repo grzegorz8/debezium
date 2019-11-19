@@ -6,6 +6,7 @@
 package io.debezium.connector.mysql;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -13,13 +14,13 @@ import com.github.shyiko.mysql.binlog.BinaryLogClient;
 import com.github.shyiko.mysql.binlog.jmx.BinaryLogClientStatistics;
 
 import io.debezium.connector.base.ChangeEventQueueMetrics;
-import io.debezium.pipeline.metrics.Metrics;
+import io.debezium.pipeline.metrics.PipelineMetrics;
 import io.debezium.util.Collect;
 
 /**
  * @author Randall Hauch
  */
-class BinlogReaderMetrics extends Metrics implements BinlogReaderMetricsMXBean {
+class BinlogReaderMetrics extends PipelineMetrics implements BinlogReaderMetricsMXBean {
 
     private final BinaryLogClient client;
     private final BinaryLogClientStatistics stats;
@@ -29,6 +30,7 @@ class BinlogReaderMetrics extends Metrics implements BinlogReaderMetricsMXBean {
     private final AtomicLong numberOfRolledBackTransactions = new AtomicLong();
     private final AtomicLong numberOfNotWellFormedTransactions = new AtomicLong();
     private final AtomicLong numberOfLargeTransactions = new AtomicLong();
+    private final AtomicBoolean isGtidModeEnabled = new AtomicBoolean(false);
     private final AtomicReference<String> lastTransactionId = new AtomicReference<>();
 
     public BinlogReaderMetrics(BinaryLogClient client, MySqlTaskContext taskContext, String name, ChangeEventQueueMetrics changeEventQueueMetrics) {
@@ -56,6 +58,11 @@ class BinlogReaderMetrics extends Metrics implements BinlogReaderMetricsMXBean {
     @Override
     public String getGtidSet() {
         return this.client.getGtidSet();
+    }
+
+    @Override
+    public boolean getIsGtidModeEnabled() {
+        return isGtidModeEnabled.get();
     }
 
     @Override
@@ -101,6 +108,7 @@ class BinlogReaderMetrics extends Metrics implements BinlogReaderMetricsMXBean {
         numberOfNotWellFormedTransactions.set(0);
         numberOfLargeTransactions.set(0);
         lastTransactionId.set(null);
+        isGtidModeEnabled.set(false);
     }
 
     @Override
@@ -143,6 +151,10 @@ class BinlogReaderMetrics extends Metrics implements BinlogReaderMetricsMXBean {
         lastTransactionId.set(gtid);
     }
 
+    public void setIsGtidModeEnabled(final boolean enabled) {
+        isGtidModeEnabled.set(enabled);
+    }
+
     @Override
     public String[] getMonitoredTables() {
         return schema.monitoredTablesAsStringArray();
@@ -158,8 +170,7 @@ class BinlogReaderMetrics extends Metrics implements BinlogReaderMetricsMXBean {
         return Collect.hashMapOf(
                 "filename", getBinlogFilename(),
                 "position", Long.toString(getBinlogPosition()),
-                "gtid", getGtidSet()
-        );
+                "gtid", getGtidSet());
     }
 
     @Override

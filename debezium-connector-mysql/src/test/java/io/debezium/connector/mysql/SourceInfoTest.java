@@ -5,6 +5,7 @@
  */
 package io.debezium.connector.mysql;
 
+import static org.fest.assertions.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -14,16 +15,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
-import io.debezium.config.Configuration;
-import org.apache.avro.Schema;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.fest.assertions.GenericAssert;
 import org.junit.Before;
 import org.junit.Test;
 
-import static org.fest.assertions.Assertions.assertThat;
-
 import io.confluent.connect.avro.AvroData;
+import io.debezium.config.Configuration;
+import io.debezium.connector.AbstractSourceInfoStructMaker;
+import io.debezium.data.VerifyRecord;
 import io.debezium.doc.FixFor;
 import io.debezium.document.Document;
 
@@ -42,7 +44,9 @@ public class SourceInfoTest {
 
     @Before
     public void beforeEach() {
-        source = new SourceInfo();
+        source = new SourceInfo(new MySqlConnectorConfig(Configuration.create()
+                .with(MySqlConnectorConfig.SERVER_NAME, "server")
+                .build()));
         inTxn = false;
         positionOfBeginEvent = 0L;
         eventNumberInTxn = 0;
@@ -178,9 +182,9 @@ public class SourceInfoTest {
         assertThat(!source.hasFilterInfo());
 
         final Configuration configuration = Configuration.create()
-                                                         .with(MySqlConnectorConfig.DATABASE_BLACKLIST, databaseBlacklist)
-                                                         .with(MySqlConnectorConfig.TABLE_BLACKLIST, tableBlacklist)
-                                                         .build();
+                .with(MySqlConnectorConfig.DATABASE_BLACKLIST, databaseBlacklist)
+                .with(MySqlConnectorConfig.TABLE_BLACKLIST, tableBlacklist)
+                .build();
         source.setFilterDataFromConfig(configuration);
 
         assertThat(source.hasFilterInfo()).isTrue();
@@ -390,7 +394,9 @@ public class SourceInfoTest {
         long position = (Long) offset.get(SourceInfo.BINLOG_POSITION_OFFSET_KEY);
         assertThat(position).isEqualTo(positionOfEvent + eventSize);
         Long rowsToSkip = (Long) offset.get(SourceInfo.BINLOG_ROW_IN_EVENT_OFFSET_KEY);
-        if (rowsToSkip == null) rowsToSkip = 0L;
+        if (rowsToSkip == null) {
+            rowsToSkip = 0L;
+        }
         assertThat(rowsToSkip).isEqualTo(0);
         assertThat(offset.get(SourceInfo.EVENTS_TO_SKIP_OFFSET_KEY)).isNull();
         if (source.gtidSet() != null) {
@@ -399,7 +405,9 @@ public class SourceInfoTest {
     }
 
     protected void handleNextEvent(long positionOfEvent, long eventSize, int rowCount) {
-        if (inTxn) ++eventNumberInTxn;
+        if (inTxn) {
+            ++eventNumberInTxn;
+        }
         source.setEventPosition(positionOfEvent, eventSize);
         for (int row = 0; row != rowCount; ++row) {
             // Get the offset for this row (always first!) ...
@@ -414,19 +422,25 @@ public class SourceInfoTest {
                 assertThat(position).isEqualTo(positionOfBeginEvent);
                 // and the number of the last completed event (the previous one) ...
                 Long eventsToSkip = (Long) offset.get(SourceInfo.EVENTS_TO_SKIP_OFFSET_KEY);
-                if (eventsToSkip == null) eventsToSkip = 0L;
+                if (eventsToSkip == null) {
+                    eventsToSkip = 0L;
+                }
                 assertThat(eventsToSkip).isEqualTo(eventNumberInTxn - 1);
-            } else {
+            }
+            else {
                 // Matches the next event ...
                 assertThat(position).isEqualTo(positionOfEvent + eventSize);
                 assertThat(offset.get(SourceInfo.EVENTS_TO_SKIP_OFFSET_KEY)).isNull();
             }
             Long rowsToSkip = (Long) offset.get(SourceInfo.BINLOG_ROW_IN_EVENT_OFFSET_KEY);
-            if (rowsToSkip == null) rowsToSkip = 0L;
+            if (rowsToSkip == null) {
+                rowsToSkip = 0L;
+            }
             if ((row + 1) == rowCount) {
                 // This is the last row, so the next binlog position should be the number of rows in the event ...
                 assertThat(rowsToSkip).isEqualTo(rowCount);
-            } else {
+            }
+            else {
                 // This is not the last row, so the next binlog position should be the row number ...
                 assertThat(rowsToSkip).isEqualTo(row + 1);
             }
@@ -455,15 +469,21 @@ public class SourceInfoTest {
         offset.put(SourceInfo.BINLOG_FILENAME_OFFSET_KEY, FILENAME);
         offset.put(SourceInfo.BINLOG_POSITION_OFFSET_KEY, Long.toString(position));
         offset.put(SourceInfo.BINLOG_ROW_IN_EVENT_OFFSET_KEY, Integer.toString(row));
-        if (gtidSet != null) offset.put(SourceInfo.GTID_SET_KEY, gtidSet);
-        if (snapshot) offset.put(SourceInfo.SNAPSHOT_KEY, Boolean.TRUE.toString());
+        if (gtidSet != null) {
+            offset.put(SourceInfo.GTID_SET_KEY, gtidSet);
+        }
+        if (snapshot) {
+            offset.put(SourceInfo.SNAPSHOT_KEY, Boolean.TRUE.toString());
+        }
         return offset;
     }
 
     protected SourceInfo sourceWith(Map<String, String> offset) {
-        source = new SourceInfo();
+        source = new SourceInfo(new MySqlConnectorConfig(Configuration.create()
+                .with(MySqlConnectorConfig.SERVER_NAME, SERVER_NAME)
+                .build()));
+        source.databaseEvent("mysql");
         source.setOffset(offset);
-        source.setServerName(SERVER_NAME);
         return source;
     }
 
@@ -473,8 +493,8 @@ public class SourceInfoTest {
      */
     @Test
     public void shouldValidateSourceInfoSchema() {
-        org.apache.kafka.connect.data.Schema kafkaSchema = SourceInfo.SCHEMA;
-        Schema avroSchema = avroData.fromConnectSchema(kafkaSchema);
+        org.apache.kafka.connect.data.Schema kafkaSchema = source.schema();
+        org.apache.avro.Schema avroSchema = avroData.fromConnectSchema(kafkaSchema);
         assertTrue(avroSchema != null);
     }
 
@@ -604,15 +624,47 @@ public class SourceInfoTest {
     }
 
     @Test
+    public void shouldHaveTimestamp() {
+        sourceWith(offset(100, 5, true));
+        source.setBinlogTimestampSeconds(1_024);
+        source.databaseEvent("mysql");
+        assertThat(source.struct().get("ts_ms")).isEqualTo(1_024_000L);
+    }
+
+    @Test
     public void versionIsPresent() {
         sourceWith(offset(100, 5, true));
+        source.databaseEvent("mysql");
         assertThat(source.struct().getString(SourceInfo.DEBEZIUM_VERSION_KEY)).isEqualTo(Module.version());
     }
 
     @Test
     public void connectorIsPresent() {
         sourceWith(offset(100, 5, true));
+        source.databaseEvent("mysql");
         assertThat(source.struct().getString(SourceInfo.DEBEZIUM_CONNECTOR_KEY)).isEqualTo(Module.name());
+    }
+
+    @Test
+    public void schemaIsCorrect() {
+        final Schema schema = SchemaBuilder.struct()
+                .name("io.debezium.connector.mysql.Source")
+                .field("version", Schema.STRING_SCHEMA)
+                .field("connector", Schema.STRING_SCHEMA)
+                .field("name", Schema.STRING_SCHEMA)
+                .field("ts_ms", Schema.INT64_SCHEMA)
+                .field("snapshot", AbstractSourceInfoStructMaker.SNAPSHOT_RECORD_SCHEMA)
+                .field("db", Schema.STRING_SCHEMA)
+                .field("table", Schema.OPTIONAL_STRING_SCHEMA)
+                .field("server_id", Schema.INT64_SCHEMA)
+                .field("gtid", Schema.OPTIONAL_STRING_SCHEMA)
+                .field("file", Schema.STRING_SCHEMA)
+                .field("pos", Schema.INT64_SCHEMA)
+                .field("row", Schema.INT32_SCHEMA)
+                .field("thread", Schema.OPTIONAL_INT64_SCHEMA)
+                .field("query", Schema.OPTIONAL_STRING_SCHEMA)
+                .build();
+        VerifyRecord.assertConnectSchemasAreEqual(null, source.schema(), schema);
     }
 
     protected Document positionWithGtids(String gtids) {
@@ -636,7 +688,7 @@ public class SourceInfoTest {
 
     protected Document positionWith(String filename, int position, String gtids, int event, int row, boolean snapshot) {
         Document pos = Document.create(SourceInfo.BINLOG_FILENAME_OFFSET_KEY, filename,
-                                       SourceInfo.BINLOG_POSITION_OFFSET_KEY, position);
+                SourceInfo.BINLOG_POSITION_OFFSET_KEY, position);
         if (row >= 0) {
             pos = pos.set(SourceInfo.BINLOG_ROW_IN_EVENT_OFFSET_KEY, row);
         }
@@ -682,7 +734,9 @@ public class SourceInfoTest {
         }
 
         public PositionAssert isAt(Document otherPosition, Predicate<String> gtidFilter) {
-            if (SourceInfo.isPositionAtOrBefore(actual, otherPosition, gtidFilter)) return this;
+            if (SourceInfo.isPositionAtOrBefore(actual, otherPosition, gtidFilter)) {
+                return this;
+            }
             failIfCustomMessageIsSet();
             throw failure(actual + " should be consider same position as " + otherPosition);
         }
@@ -700,7 +754,9 @@ public class SourceInfoTest {
         }
 
         public PositionAssert isAtOrBefore(Document otherPosition, Predicate<String> gtidFilter) {
-            if (SourceInfo.isPositionAtOrBefore(actual, otherPosition, gtidFilter)) return this;
+            if (SourceInfo.isPositionAtOrBefore(actual, otherPosition, gtidFilter)) {
+                return this;
+            }
             failIfCustomMessageIsSet();
             throw failure(actual + " should be consider same position as or before " + otherPosition);
         }
@@ -710,7 +766,9 @@ public class SourceInfoTest {
         }
 
         public PositionAssert isAfter(Document otherPosition, Predicate<String> gtidFilter) {
-            if (!SourceInfo.isPositionAtOrBefore(actual, otherPosition, gtidFilter)) return this;
+            if (!SourceInfo.isPositionAtOrBefore(actual, otherPosition, gtidFilter)) {
+                return this;
+            }
             failIfCustomMessageIsSet();
             throw failure(actual + " should be consider after " + otherPosition);
         }

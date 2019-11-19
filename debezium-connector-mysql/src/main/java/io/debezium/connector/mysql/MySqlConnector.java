@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory;
 
 import io.debezium.config.Configuration;
 import io.debezium.jdbc.JdbcConnection;
+import io.debezium.util.Strings;
 
 /**
  * A Kafka Connect source connector that creates tasks that read the MySQL binary log and generate the corresponding
@@ -29,12 +30,12 @@ import io.debezium.jdbc.JdbcConnection;
  * <h2>Configuration</h2>
  * <p>
  * This connector is configured with the set of properties described in {@link MySqlConnectorConfig}.
- * 
- * 
+ *
+ *
  * @author Randall Hauch
  */
 public class MySqlConnector extends SourceConnector {
-    
+
     private Logger logger = LoggerFactory.getLogger(getClass());
     private Map<String, String> props;
 
@@ -82,9 +83,9 @@ public class MySqlConnector extends SourceConnector {
         ConfigValue hostnameValue = results.get(MySqlConnectorConfig.HOSTNAME.name());
         ConfigValue portValue = results.get(MySqlConnectorConfig.PORT.name());
         ConfigValue userValue = results.get(MySqlConnectorConfig.USER.name());
-        ConfigValue passwordValue = results.get(MySqlConnectorConfig.PASSWORD.name());
+        final String passwordValue = config.getString(MySqlConnectorConfig.PASSWORD);
 
-        if (passwordValue.value() == null || ((String)passwordValue.value()).isEmpty()) {
+        if (Strings.isNullOrEmpty(passwordValue)) {
             logger.warn("The connection password is empty");
         }
 
@@ -99,10 +100,12 @@ public class MySqlConnector extends SourceConnector {
                 try {
                     mysql.execute("SELECT version()");
                     logger.info("Successfully tested connection for {} with user '{}'", jdbcContext.connectionString(), mysql.username());
-                } catch (SQLException e) {
+                }
+                catch (SQLException e) {
                     logger.info("Failed testing connection for {} with user '{}'", jdbcContext.connectionString(), mysql.username());
                     hostnameValue.addErrorMessage("Unable to connect: " + e.getMessage());
-                } finally {
+                }
+                finally {
                     jdbcContext.shutdown();
                 }
             }

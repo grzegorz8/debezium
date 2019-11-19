@@ -28,6 +28,7 @@ import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
 import io.debezium.pipeline.spi.OffsetContext;
 import io.debezium.pipeline.spi.SnapshotResult;
 import io.debezium.pipeline.spi.SnapshotResult.SnapshotResultStatus;
+import io.debezium.relational.RelationalDatabaseSchema;
 import io.debezium.util.Threads;
 
 /**
@@ -47,6 +48,7 @@ public class ChangeEventSourceCoordinator {
     private final ChangeEventSourceFactory changeEventSourceFactory;
     private final ExecutorService executor;
     private final EventDispatcher<?> eventDispatcher;
+    private final RelationalDatabaseSchema schema;
 
     private volatile boolean running;
     private volatile StreamingChangeEventSource streamingSource;
@@ -54,15 +56,18 @@ public class ChangeEventSourceCoordinator {
     private SnapshotChangeEventSourceMetrics snapshotMetrics;
     private StreamingChangeEventSourceMetrics streamingMetrics;
 
-    public ChangeEventSourceCoordinator(OffsetContext previousOffset, ErrorHandler errorHandler, Class<? extends SourceConnector> connectorType, String logicalName, ChangeEventSourceFactory changeEventSourceFactory, EventDispatcher<?> eventDispatcher) {
+    public ChangeEventSourceCoordinator(OffsetContext previousOffset, ErrorHandler errorHandler, Class<? extends SourceConnector> connectorType, String logicalName,
+                                        ChangeEventSourceFactory changeEventSourceFactory, EventDispatcher<?> eventDispatcher, RelationalDatabaseSchema schema) {
         this.previousOffset = previousOffset;
         this.errorHandler = errorHandler;
         this.changeEventSourceFactory = changeEventSourceFactory;
         this.executor = Threads.newSingleThreadExecutor(connectorType, logicalName, "change-event-source-coordinator");
         this.eventDispatcher = eventDispatcher;
+        this.schema = schema;
     }
 
-    public synchronized <T extends CdcSourceTaskContext> void start(T taskContext, ChangeEventQueueMetrics changeEventQueueMetrics, EventMetadataProvider metadataProvider) {
+    public synchronized <T extends CdcSourceTaskContext> void start(T taskContext, ChangeEventQueueMetrics changeEventQueueMetrics,
+                                                                    EventMetadataProvider metadataProvider) {
         this.snapshotMetrics = new SnapshotChangeEventSourceMetrics(taskContext, changeEventQueueMetrics, metadataProvider);
         this.streamingMetrics = new StreamingChangeEventSourceMetrics(taskContext, changeEventQueueMetrics, metadataProvider);
         running = true;
@@ -72,25 +77,34 @@ public class ChangeEventSourceCoordinator {
             try {
                 snapshotMetrics.register(LOGGER);
                 streamingMetrics.register(LOGGER);
+                LOGGER.info("Metrics registered");
 
                 ChangeEventSourceContext context = new ChangeEventSourceContextImpl();
+                LOGGER.info("Context created");
 
                 SnapshotChangeEventSource snapshotSource = changeEventSourceFactory.getSnapshotChangeEventSource(previousOffset, snapshotMetrics);
                 eventDispatcher.setEventListener(snapshotMetrics);
                 SnapshotResult snapshotResult = snapshotSource.execute(context);
+                LOGGER.info("Snapshot ended with {}", snapshotResult);
 
-                if (running && snapshotResult.getStatus() == SnapshotResultStatus.COMPLETED) {
+                if (snapshotResult.getStatus() == SnapshotResultStatus.COMPLETED || schema.tableInformationComplete()) {
+                    schema.assureNonEmptySchema();
+                }
+
+                if (running && snapshotResult.isCompletedOrSkipped()) {
                     streamingSource = changeEventSourceFactory.getStreamingChangeEventSource(snapshotResult.getOffset());
                     eventDispatcher.setEventListener(streamingMetrics);
                     streamingMetrics.connected(true);
+                    LOGGER.info("Starting streaming");
                     streamingSource.execute(context);
+                    LOGGER.info("Finished streaming");
                 }
             }
             catch (InterruptedException e) {
-                Thread.interrupted();
+                Thread.currentThread().interrupt();
                 LOGGER.warn("Change event source executor was interrupted", e);
             }
-            catch (Exception e) {
+            catch (Throwable e) {
                 errorHandler.setProducerThrowable(e);
             }
             finally {
@@ -100,7 +114,7 @@ public class ChangeEventSourceCoordinator {
     }
 
     public void commitOffset(Map<String, ?> offset) {
-        if (streamingSource != null) {
+        if (streamingSource != null && offset != null) {
             streamingSource.commitOffset(offset);
         }
     }
@@ -111,18 +125,26 @@ public class ChangeEventSourceCoordinator {
     public synchronized void stop() throws InterruptedException {
         running = false;
 
-        executor.shutdown();
-        Thread.interrupted();
-        boolean isShutdown = executor.awaitTermination(SHUTDOWN_WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        try {
+            // Clear interrupt flag so the graceful termination is always attempted
+            Thread.interrupted();
+            executor.shutdown();
+            boolean isShutdown = executor.awaitTermination(SHUTDOWN_WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
 
-        if (!isShutdown) {
-            LOGGER.warn("Coordinator didn't stop in the expected time, shutting down executor now");
+            if (!isShutdown) {
+                LOGGER.warn("Coordinator didn't stop in the expected time, shutting down executor now");
 
-            executor.shutdownNow();
-            executor.awaitTermination(SHUTDOWN_WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+                // Clear interrupt flag so the forced termination is always attempted
+                Thread.interrupted();
+                executor.shutdownNow();
+                executor.awaitTermination(SHUTDOWN_WAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+            }
         }
-        snapshotMetrics.unregister(LOGGER);
-        streamingMetrics.unregister(LOGGER);
+        finally {
+            snapshotMetrics.unregister(LOGGER);
+            streamingMetrics.unregister(LOGGER);
+        }
+        Thread.currentThread().interrupt();
     }
 
     private class ChangeEventSourceContextImpl implements ChangeEventSourceContext {

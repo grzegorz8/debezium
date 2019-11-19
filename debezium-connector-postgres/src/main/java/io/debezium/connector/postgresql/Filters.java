@@ -12,9 +12,9 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import io.debezium.annotation.Immutable;
-import io.debezium.relational.ColumnId;
 import io.debezium.relational.Selectors;
 import io.debezium.relational.TableId;
+import io.debezium.relational.Tables.ColumnNameFilter;
 import io.debezium.relational.Tables.TableFilter;
 
 /**
@@ -31,7 +31,7 @@ public class Filters {
     protected static final String TEMP_TABLE_BLACKLIST = ".*\\.pg_temp.*";
 
     private final TableFilter tableFilter;
-    private final Predicate<ColumnId> columnFilter;
+    private final ColumnNameFilter columnFilter;
 
     /**
      * @param config the configuration; may not be null
@@ -42,35 +42,37 @@ public class Filters {
         String schemaBlacklist = config.schemaBlacklist();
         if (schemaBlacklist != null) {
             schemaBlacklist = schemaBlacklist + "," + SYSTEM_SCHEMA_BLACKLIST;
-        } else {
+        }
+        else {
             schemaBlacklist = SYSTEM_SCHEMA_BLACKLIST;
         }
 
         String tableBlacklist = config.tableBlacklist();
         if (tableBlacklist != null) {
             tableBlacklist = tableBlacklist + "," + TEMP_TABLE_BLACKLIST;
-        } else {
+        }
+        else {
             tableBlacklist = TEMP_TABLE_BLACKLIST;
         }
 
         // Define the filter using the whitelists and blacklists for table names ...
         this.tableFilter = TableFilter.fromPredicate(Selectors.tableSelector()
-                                    .includeTables(config.tableWhitelist())
-                                    .excludeTables(tableBlacklist)
-                                    .includeSchemas(config.schemaWhitelist())
-                                    .excludeSchemas(schemaBlacklist)
-                                    .build());
-
+                .includeTables(config.tableWhitelist())
+                .excludeTables(tableBlacklist)
+                .includeSchemas(config.schemaWhitelist())
+                .excludeSchemas(schemaBlacklist)
+                .build());
 
         // Define the filter that excludes blacklisted columns, truncated columns, and masked columns ...
-        this.columnFilter = Selectors.excludeColumns(config.columnBlacklist());
+        this.columnFilter = ColumnNameFilter.getInstance(config.columnBlacklist());
     }
 
     protected TableFilter tableFilter() {
         return tableFilter;
     }
 
-    protected Predicate<ColumnId> columnFilter() {
+    protected ColumnNameFilter columnFilter() {
         return columnFilter;
     }
+
 }

@@ -36,11 +36,16 @@ public class TableChanges implements Iterable<TableChange> {
         this.changes = new ArrayList<>();
     }
 
-    public static TableChanges fromArray(Array array) {
+    /**
+     * @param useCatalogBeforeSchema true if the parsed string contains only 2 items and the first should be used as
+     * the catalog and the second as the table name, or false if the first should be used as the schema and the
+     * second as the table name
+     */
+    public static TableChanges fromArray(Array array, boolean useCatalogBeforeSchema) {
         TableChanges tableChanges = new TableChanges();
 
         for (Entry entry : array) {
-            TableChange change = TableChange.fromDocument(entry.getValue().asDocument());
+            TableChange change = TableChange.fromDocument(entry.getValue().asDocument(), useCatalogBeforeSchema);
 
             if (change.getType() == TableChangeType.CREATE) {
                 tableChanges.create(change.table);
@@ -70,9 +75,9 @@ public class TableChanges implements Iterable<TableChange> {
 
     public Array toArray() {
         List<Value> values = changes.stream()
-            .map(TableChange::toDocument)
-            .map(Value::create)
-            .collect(Collectors.toList());
+                .map(TableChange::toDocument)
+                .map(Value::create)
+                .collect(Collectors.toList());
 
         return Array.create(values);
     }
@@ -87,12 +92,15 @@ public class TableChanges implements Iterable<TableChange> {
 
     @Override
     public boolean equals(Object obj) {
-        if (this == obj)
+        if (this == obj) {
             return true;
-        if (obj == null)
+        }
+        if (obj == null) {
             return false;
-        if (getClass() != obj.getClass())
+        }
+        if (getClass() != obj.getClass()) {
             return false;
+        }
         TableChanges other = (TableChanges) obj;
 
         return changes.equals(other.changes);
@@ -115,9 +123,9 @@ public class TableChanges implements Iterable<TableChange> {
             this.id = table.id();
         }
 
-        public static TableChange fromDocument(Document document) {
+        public static TableChange fromDocument(Document document, boolean useCatalogBeforeSchema) {
             TableChangeType type = TableChangeType.valueOf(document.getString("type"));
-            TableId id = TableId.parse(document.getString("id"));
+            TableId id = TableId.parse(document.getString("id"), useCatalogBeforeSchema);
             Table table = null;
 
             if (type == TableChangeType.CREATE || type == TableChangeType.ALTER) {
@@ -143,7 +151,7 @@ public class TableChanges implements Iterable<TableChange> {
             Document document = Document.create();
 
             document.setString("type", type.name());
-            document.setString("id", id.toString());
+            document.setString("id", id.toDoubleQuotedString());
             document.setDocument("table", toDocument(table));
             return document;
         }
@@ -160,22 +168,30 @@ public class TableChanges implements Iterable<TableChange> {
 
         @Override
         public boolean equals(Object obj) {
-            if (this == obj)
+            if (this == obj) {
                 return true;
-            if (obj == null)
+            }
+            if (obj == null) {
                 return false;
-            if (getClass() != obj.getClass())
+            }
+            if (getClass() != obj.getClass()) {
                 return false;
+            }
             TableChange other = (TableChange) obj;
-            if (!id.equals(other.id))
+            if (!id.equals(other.id)) {
                 return false;
+            }
             if (table == null) {
-                if (other.table != null)
+                if (other.table != null) {
                     return false;
-            } else if (!table.equals(other.table))
+                }
+            }
+            else if (!table.equals(other.table)) {
                 return false;
-            if (type != other.type)
+            }
+            if (type != other.type) {
                 return false;
+            }
             return true;
         }
 
@@ -191,9 +207,9 @@ public class TableChanges implements Iterable<TableChange> {
             document.set("primaryKeyColumnNames", Array.create(table.primaryKeyColumnNames()));
 
             List<Document> columns = table.columns()
-                .stream()
-                .map(this::toDocument)
-                .collect(Collectors.toList());
+                    .stream()
+                    .map(this::toDocument)
+                    .collect(Collectors.toList());
 
             document.setArray("columns", Array.create(columns));
 
@@ -230,48 +246,48 @@ public class TableChanges implements Iterable<TableChange> {
 
         private static Table fromDocument(TableId id, Document document) {
             TableEditor editor = Table.editor()
-                .tableId(id)
-                .setDefaultCharsetName(document.getString("defaultCharsetName"));
+                    .tableId(id)
+                    .setDefaultCharsetName(document.getString("defaultCharsetName"));
 
             document.getArray("columns")
-                .streamValues()
-                .map(Value::asDocument)
-                .map(v -> {
-                    ColumnEditor columnEditor = Column.editor()
-                        .name(v.getString("name"))
-                        .jdbcType(v.getInteger("jdbcType"));
+                    .streamValues()
+                    .map(Value::asDocument)
+                    .map(v -> {
+                        ColumnEditor columnEditor = Column.editor()
+                                .name(v.getString("name"))
+                                .jdbcType(v.getInteger("jdbcType"));
 
                         Integer nativeType = v.getInteger("nativeType");
                         if (nativeType != null) {
                             columnEditor.nativeType(nativeType);
                         }
 
-                       columnEditor.type(v.getString("typeName"), v.getString("typeExpression"))
-                           .charsetName(v.getString("charsetName"));
+                        columnEditor.type(v.getString("typeName"), v.getString("typeExpression"))
+                                .charsetName(v.getString("charsetName"));
 
-                       Integer length = v.getInteger("length");
-                       if (length != null) {
-                           columnEditor.length(length);
-                       }
+                        Integer length = v.getInteger("length");
+                        if (length != null) {
+                            columnEditor.length(length);
+                        }
 
-                       Integer scale = v.getInteger("scale");
-                       if (scale != null) {
-                           columnEditor.scale(scale);
-                       }
+                        Integer scale = v.getInteger("scale");
+                        if (scale != null) {
+                            columnEditor.scale(scale);
+                        }
 
-                       columnEditor.position(v.getInteger("position"))
-                           .optional(v.getBoolean("optional"))
-                           .autoIncremented(v.getBoolean("autoIncremented"))
-                           .generated(v.getBoolean("generated"));
+                        columnEditor.position(v.getInteger("position"))
+                                .optional(v.getBoolean("optional"))
+                                .autoIncremented(v.getBoolean("autoIncremented"))
+                                .generated(v.getBoolean("generated"));
 
-                    return columnEditor.create();
-                })
-                .forEach(editor::addColumn);
+                        return columnEditor.create();
+                    })
+                    .forEach(editor::addColumn);
 
             editor.setPrimaryKeyNames(document.getArray("primaryKeyColumnNames")
-                .streamValues()
-                .map(Value::asString)
-                .collect(Collectors.toList()));
+                    .streamValues()
+                    .map(Value::asString)
+                    .collect(Collectors.toList()));
 
             return editor.create();
         }

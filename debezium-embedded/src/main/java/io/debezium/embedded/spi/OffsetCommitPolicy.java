@@ -14,7 +14,7 @@ import io.debezium.embedded.EmbeddedEngine;
 
 /**
  * The policy that defines when the offsets should be committed to {@link OffsetBackingStore offset storage}.
- * 
+ *
  * @author Randall Hauch
  */
 @FunctionalInterface
@@ -47,7 +47,7 @@ public interface OffsetCommitPolicy {
 
         @Override
         public boolean performCommit(long numberOfMessagesSinceLastCommit, Duration timeSinceLastCommit) {
-                return timeSinceLastCommit.compareTo(minimumTime) >= 0;
+            return timeSinceLastCommit.compareTo(minimumTime) >= 0;
         }
     }
 
@@ -61,7 +61,7 @@ public interface OffsetCommitPolicy {
 
     /**
      * Determine if a commit of the offsets should be performed.
-     * 
+     *
      * @param numberOfMessagesSinceLastCommit the number of messages that have been received from the connector since last
      *            the offsets were last committed; never negative
      * @param timeSinceLastCommit the time that has elapsed since the offsets were last committed; never negative
@@ -71,23 +71,27 @@ public interface OffsetCommitPolicy {
 
     /**
      * Obtain a new {@link OffsetCommitPolicy} that will commit offsets if this policy OR the other requests it.
-     * 
+     *
      * @param other the other commit policy; if null, then this policy instance is returned as is
      * @return the resulting policy; never null
      */
     default OffsetCommitPolicy or(OffsetCommitPolicy other) {
-        if ( other == null ) return this;
+        if (other == null) {
+            return this;
+        }
         return (number, time) -> this.performCommit(number, time) || other.performCommit(number, time);
     }
 
     /**
      * Obtain a new {@link OffsetCommitPolicy} that will commit offsets if both this policy AND the other requests it.
-     * 
+     *
      * @param other the other commit policy; if null, then this policy instance is returned as is
      * @return the resulting policy; never null
      */
     default OffsetCommitPolicy and(OffsetCommitPolicy other) {
-        if ( other == null ) return this;
+        if (other == null) {
+            return this;
+        }
         return (number, time) -> this.performCommit(number, time) && other.performCommit(number, time);
     }
 }

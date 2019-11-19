@@ -15,7 +15,7 @@ import io.debezium.util.Collect;
 
 /**
  * A utility that is contains various filters for acceptable database names, {@link CollectionId}s, and fields.
- * 
+ *
  * @author Randall Hauch
  */
 public final class Filters {
@@ -28,7 +28,7 @@ public final class Filters {
 
     /**
      * Create an instance of the filters.
-     * 
+     *
      * @param config the configuration; may not be null
      */
     public Filters(Configuration config) {
@@ -36,10 +36,12 @@ public final class Filters {
         String dbBlacklist = config.getString(MongoDbConnectorConfig.DATABASE_BLACKLIST);
         if (dbWhitelist != null && !dbWhitelist.trim().isEmpty()) {
             databaseFilter = Predicates.includes(dbWhitelist);
-         } else if (dbBlacklist != null && !dbBlacklist.trim().isEmpty()) {
+        }
+        else if (dbBlacklist != null && !dbBlacklist.trim().isEmpty()) {
             databaseFilter = Predicates.excludes(dbBlacklist);
-        } else {
-            databaseFilter = (db)->true;
+        }
+        else {
+            databaseFilter = (db) -> true;
         }
 
         String collectionWhitelist = config.getString(MongoDbConnectorConfig.COLLECTION_WHITELIST);
@@ -47,9 +49,11 @@ public final class Filters {
         final Predicate<CollectionId> collectionFilter;
         if (collectionWhitelist != null && !collectionWhitelist.trim().isEmpty()) {
             collectionFilter = Predicates.includes(collectionWhitelist, CollectionId::namespace);
-        } else if (collectionBlacklist != null && !collectionBlacklist.trim().isEmpty()) {
+        }
+        else if (collectionBlacklist != null && !collectionBlacklist.trim().isEmpty()) {
             collectionFilter = Predicates.excludes(collectionBlacklist, CollectionId::namespace);
-        } else {
+        }
+        else {
             collectionFilter = (id) -> true;
         }
         Predicate<CollectionId> isNotBuiltIn = this::isNotBuiltIn;
@@ -61,7 +65,7 @@ public final class Filters {
                 .renameFields(config.getString(MongoDbConnectorConfig.FIELD_RENAMES))
                 .build();
     }
-    
+
     /**
      * Get the predicate function that determines whether the given database is to be included.
      *
@@ -73,7 +77,7 @@ public final class Filters {
 
     /**
      * Get the predicate function that determines whether the given collection is to be included.
-     * 
+     *
      * @return the collection filter; never null
      */
     public Predicate<CollectionId> collectionFilter() {
@@ -89,7 +93,7 @@ public final class Filters {
     public FieldFilter fieldFilterFor(CollectionId id) {
         return fieldSelector.fieldFilterFor(id);
     }
-    
+
     protected boolean isNotBuiltIn(CollectionId id) {
         return !BUILT_IN_DB_NAMES.contains(id.dbName());
     }

@@ -37,8 +37,8 @@ import io.debezium.util.FunctionalReadWriteLock;
 public final class FileDatabaseHistory extends AbstractDatabaseHistory {
 
     public static final Field FILE_PATH = Field.create(CONFIGURATION_FIELD_PREFIX_STRING + "file.filename")
-                                               .withDescription("The path to the file that will be used to record the database history")
-                                               .withValidation(Field::isRequired);
+            .withDescription("The path to the file that will be used to record the database history")
+            .withValidation(Field::isRequired);
 
     public static Collection<Field> ALL_FIELDS = Collect.arrayListOf(FILE_PATH);
 
@@ -50,7 +50,7 @@ public final class FileDatabaseHistory extends AbstractDatabaseHistory {
     private Path path;
 
     @Override
-    public void configure(Configuration config, HistoryRecordComparator comparator) {
+    public void configure(Configuration config, HistoryRecordComparator comparator, DatabaseHistoryListener listener, boolean useCatalogBeforeSchema) {
         if (!config.validateAndRecord(ALL_FIELDS, logger::error)) {
             throw new ConnectException(
                     "Error configuring an instance of " + getClass().getSimpleName() + "; check the logs for details");
@@ -59,12 +59,13 @@ public final class FileDatabaseHistory extends AbstractDatabaseHistory {
         if (running.get()) {
             throw new IllegalStateException("Database history file already initialized to " + path);
         }
-        super.configure(config, comparator);
+        super.configure(config, comparator, listener, useCatalogBeforeSchema);
         path = Paths.get(config.getString(FILE_PATH));
     }
 
     @Override
     public void start() {
+        super.start();
         lock.write(() -> {
             if (running.compareAndSet(false, true)) {
                 Path path = this.path;
@@ -74,14 +75,19 @@ public final class FileDatabaseHistory extends AbstractDatabaseHistory {
                 try {
                     // Make sure the file exists ...
                     if (!Files.exists(path)) {
-                        Files.createDirectories(path.getParent());
+                        // Create parent directories if we have them ...
+                        if (path.getParent() != null) {
+                            Files.createDirectories(path.getParent());
+                        }
                         try {
                             Files.createFile(path);
-                        } catch (FileAlreadyExistsException e) {
+                        }
+                        catch (FileAlreadyExistsException e) {
                             // do nothing
                         }
                     }
-                } catch (IOException e) {
+                }
+                catch (IOException e) {
                     throw new DatabaseHistoryException("Unable to create history file at " + path + ": " + e.getMessage(), e);
                 }
             }
@@ -90,7 +96,9 @@ public final class FileDatabaseHistory extends AbstractDatabaseHistory {
 
     @Override
     protected void storeRecord(HistoryRecord record) throws DatabaseHistoryException {
-        if (record == null) return;
+        if (record == null) {
+            return;
+        }
         lock.write(() -> {
             if (!running.get()) {
                 throw new IllegalStateException("The history has been stopped and will not accept more records");
@@ -103,14 +111,17 @@ public final class FileDatabaseHistory extends AbstractDatabaseHistory {
                     try {
                         historyWriter.append(line);
                         historyWriter.newLine();
-                    } catch (IOException e) {
+                    }
+                    catch (IOException e) {
                         logger.error("Failed to add record to history at {}: {}", path, record, e);
                         return;
                     }
-                } catch (IOException e) {
+                }
+                catch (IOException e) {
                     throw new DatabaseHistoryException("Unable to create writer for history file " + path + ": " + e.getMessage(), e);
                 }
-            } catch (IOException e) {
+            }
+            catch (IOException e) {
                 logger.error("Failed to convert record to string: {}", record, e);
             }
         });
@@ -119,6 +130,7 @@ public final class FileDatabaseHistory extends AbstractDatabaseHistory {
     @Override
     public void stop() {
         running.set(false);
+        super.stop();
     }
 
     @Override
@@ -132,12 +144,13 @@ public final class FileDatabaseHistory extends AbstractDatabaseHistory {
                         }
                     }
                 }
-            } catch (IOException e) {
+            }
+            catch (IOException e) {
                 logger.error("Failed to add recover records from history at {}", path, e);
             }
         });
     }
-    
+
     @Override
     public boolean exists() {
         return Files.exists(path);

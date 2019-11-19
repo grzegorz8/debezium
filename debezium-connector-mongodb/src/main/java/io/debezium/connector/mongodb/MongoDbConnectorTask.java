@@ -82,7 +82,7 @@ public final class MongoDbConnectorTask extends BaseSourceTask {
             // Read from the configuration the information about the replica sets we are to watch ...
             final String hosts = config.getString(MongoDbConnectorConfig.HOSTS);
             final ReplicaSets replicaSets = ReplicaSets.parse(hosts);
-            if ( replicaSets.validReplicaSetCount() == 0) {
+            if (replicaSets.validReplicaSetCount() == 0) {
                 throw new ConnectException(
                         "Unable to start MongoDB connector task since no replica sets were found at " + hosts);
             }
@@ -125,15 +125,18 @@ public final class MongoDbConnectorTask extends BaseSourceTask {
                         taskContext.configureLoggingContext(replicaSet.replicaSetName());
                         // Run the replicator, which should run forever until it is stopped ...
                         replicator.run();
-                    } finally {
+                    }
+                    finally {
                         try {
                             replicators.remove(replicator);
-                        } finally {
+                        }
+                        finally {
                             if (stillRunning.decrementAndGet() == 0) {
                                 // we are the last one, so clean up ...
                                 try {
                                     executor.shutdown();
-                                } finally {
+                                }
+                                finally {
                                     taskContext.getConnectionContext().shutdown();
                                 }
                             }
@@ -142,7 +145,8 @@ public final class MongoDbConnectorTask extends BaseSourceTask {
                 });
             });
             logger.info("Successfully started MongoDB connector task with {} thread(s) for replica sets {}", numThreads, replicaSets);
-        } finally {
+        }
+        finally {
             previousLogContext.restore();
         }
     }
@@ -150,7 +154,7 @@ public final class MongoDbConnectorTask extends BaseSourceTask {
     @Override
     public List<SourceRecord> poll() throws InterruptedException {
         if (replicatorError != null) {
-            throw new ConnectException("Failing connector task, at least one of the replicators has failed");
+            throw new ConnectException("Failing connector task, at least one of the replicators has failed", replicatorError);
         }
         List<SourceRecord> records = queue.poll();
         recordSummarizer.accept(records);
@@ -173,9 +177,11 @@ public final class MongoDbConnectorTask extends BaseSourceTask {
                 }
                 logger.info("Stopped MongoDB replication task by stopping {} replicator threads", counter);
             }
-        } catch (Throwable e) {
+        }
+        catch (Throwable e) {
             logger.error("Unexpected error shutting down the MongoDB replication task", e);
-        } finally {
+        }
+        finally {
             previousLogContext.restore();
         }
     }
@@ -199,8 +205,12 @@ public final class MongoDbConnectorTask extends BaseSourceTask {
 
         @Override
         public void accept(List<SourceRecord> records) {
-            if (records.isEmpty()) return;
-            if (!logger.isInfoEnabled()) return;
+            if (records.isEmpty()) {
+                return;
+            }
+            if (!logger.isInfoEnabled()) {
+                return;
+            }
             summaryByReplicaSet.clear();
             records.forEach(record -> {
                 String replicaSetName = SourceInfo.replicaSetNameForPartition(record.sourcePartition());
@@ -213,9 +223,10 @@ public final class MongoDbConnectorTask extends BaseSourceTask {
                 try {
                     summaryByReplicaSet.forEach((rsName, summary) -> {
                         logger.info("{} records sent for replica set '{}', last offset: {}",
-                                    summary.recordCount(), rsName, summary.lastOffset());
+                                summary.recordCount(), rsName, summary.lastOffset());
                     });
-                } finally {
+                }
+                finally {
                     prevContext.restore();
                 }
             }

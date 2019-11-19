@@ -5,6 +5,7 @@
  */
 package io.debezium.connector.mysql;
 
+import java.time.Instant;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,22 +66,22 @@ public class RecordMakers {
      * @see MySqlConnectorTask#getRestartOffset(Map)
      */
     public RecordMakers(MySqlSchema schema, SourceInfo source, TopicSelector<TableId> topicSelector,
-            boolean emitTombstoneOnDelete, Map<String, ?> restartOffset) {
+                        boolean emitTombstoneOnDelete, Map<String, ?> restartOffset) {
         this.schema = schema;
         this.source = source;
         this.topicSelector = topicSelector;
         this.emitTombstoneOnDelete = emitTombstoneOnDelete;
         this.restartOffset = restartOffset;
         this.schemaChangeKeySchema = SchemaBuilder.struct()
-                                                  .name(schemaNameAdjuster.adjust("io.debezium.connector.mysql.SchemaChangeKey"))
-                                                  .field(Fields.DATABASE_NAME, Schema.STRING_SCHEMA)
-                                                  .build();
+                .name(schemaNameAdjuster.adjust("io.debezium.connector.mysql.SchemaChangeKey"))
+                .field(Fields.DATABASE_NAME, Schema.STRING_SCHEMA)
+                .build();
         this.schemaChangeValueSchema = SchemaBuilder.struct()
-                                                    .name(schemaNameAdjuster.adjust("io.debezium.connector.mysql.SchemaChangeValue"))
-                                                    .field(Fields.SOURCE, SourceInfo.SCHEMA)
-                                                    .field(Fields.DATABASE_NAME, Schema.STRING_SCHEMA)
-                                                    .field(Fields.DDL_STATEMENTS, Schema.STRING_SCHEMA)
-                                                    .build();
+                .name(schemaNameAdjuster.adjust("io.debezium.connector.mysql.SchemaChangeValue"))
+                .field(Fields.SOURCE, source.schema())
+                .field(Fields.DATABASE_NAME, Schema.STRING_SCHEMA)
+                .field(Fields.DDL_STATEMENTS, Schema.STRING_SCHEMA)
+                .build();
     }
 
     /**
@@ -104,7 +106,9 @@ public class RecordMakers {
      */
     public boolean hasTable(TableId tableId) {
         Long tableNumber = tableNumbersByTableId.get(tableId);
-        if ( tableNumber == null ) return false;
+        if (tableNumber == null) {
+            return false;
+        }
         Converter converter = convertersByTableNumber.get(tableNumber);
         return converter != null;
     }
@@ -119,7 +123,9 @@ public class RecordMakers {
      */
     public RecordsForTable forTable(long tableNumber, BitSet includedColumns, BlockingConsumer<SourceRecord> consumer) {
         Converter converter = convertersByTableNumber.get(tableNumber);
-        if (converter == null) return null;
+        if (converter == null) {
+            return null;
+        }
         return new RecordsForTable(converter, includedColumns, consumer);
     }
 
@@ -127,21 +133,23 @@ public class RecordMakers {
      * Produce a schema change record for the given DDL statements.
      *
      * @param databaseName the name of the database that is affected by the DDL statements; may not be null
+     * @param tables the list of tables affected by the DDL statements
      * @param ddlStatements the DDL statements; may not be null
      * @param consumer the consumer for all produced records; may not be null
      * @return the number of records produced; will be 0 or more
      */
-    public int schemaChanges(String databaseName, String ddlStatements, BlockingConsumer<SourceRecord> consumer) {
+    public int schemaChanges(String databaseName, Set<TableId> tables, String ddlStatements, BlockingConsumer<SourceRecord> consumer) {
         String topicName = topicSelector.getPrimaryTopic();
         Integer partition = 0;
         Struct key = schemaChangeRecordKey(databaseName);
-        Struct value = schemaChangeRecordValue(databaseName, ddlStatements);
+        Struct value = schemaChangeRecordValue(databaseName, tables, ddlStatements);
         SourceRecord record = new SourceRecord(source.partition(), source.offset(),
                 topicName, partition, schemaChangeKeySchema, key, schemaChangeValueSchema, value);
         try {
             consumer.accept(record);
             return 1;
-        } catch (InterruptedException e) {
+        }
+        catch (InterruptedException e) {
             return 0;
         }
     }
@@ -176,7 +184,7 @@ public class RecordMakers {
             return sourceOffset;
         }
         else {
-            for(Entry<String, ?> restartOffsetEntry : restartOffset.entrySet()){
+            for (Entry<String, ?> restartOffsetEntry : restartOffset.entrySet()) {
                 sourceOffset.put(SourceInfo.RESTART_PREFIX + restartOffsetEntry.getKey(), restartOffsetEntry.getValue());
             }
 
@@ -200,7 +208,9 @@ public class RecordMakers {
             return true;
         }
         TableSchema tableSchema = schema.schemaFor(id);
-        if (tableSchema == null) return false;
+        if (tableSchema == null) {
+            return false;
+        }
 
         String topicName = topicSelector.topicNameFor(id);
         Envelope envelope = tableSchema.getEnvelopeSchema();
@@ -210,7 +220,7 @@ public class RecordMakers {
         Converter converter = new Converter() {
 
             @Override
-            public int read(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, long ts,
+            public int read(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, Instant ts,
                             BlockingConsumer<SourceRecord> consumer)
                     throws InterruptedException {
                 Object key = tableSchema.keyFromColumnData(row);
@@ -219,7 +229,8 @@ public class RecordMakers {
                     Schema keySchema = tableSchema.keySchema();
                     Map<String, ?> partition = source.partition();
                     Map<String, Object> offset = source.offsetForRow(rowNumber, numberOfRows);
-                    Struct origin = source.struct(id);
+                    source.tableEvent(id);
+                    Struct origin = source.struct();
                     SourceRecord record = new SourceRecord(partition, getSourceRecordOffset(offset), topicName, partitionNum,
                             keySchema, key, envelope.schema(), envelope.read(value, origin, ts));
                     consumer.accept(record);
@@ -229,16 +240,18 @@ public class RecordMakers {
             }
 
             @Override
-            public int insert(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, long ts,
+            public int insert(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, Instant ts,
                               BlockingConsumer<SourceRecord> consumer)
                     throws InterruptedException {
+                validateColumnCount(tableSchema, row);
                 Object key = tableSchema.keyFromColumnData(row);
                 Struct value = tableSchema.valueFromColumnData(row);
                 if (value != null || key != null) {
                     Schema keySchema = tableSchema.keySchema();
                     Map<String, ?> partition = source.partition();
                     Map<String, Object> offset = source.offsetForRow(rowNumber, numberOfRows);
-                    Struct origin = source.struct(id);
+                    source.tableEvent(id);
+                    Struct origin = source.struct();
                     SourceRecord record = new SourceRecord(partition, getSourceRecordOffset(offset), topicName, partitionNum,
                             keySchema, key, envelope.schema(), envelope.create(value, origin, ts));
                     consumer.accept(record);
@@ -249,10 +262,11 @@ public class RecordMakers {
 
             @Override
             public int update(SourceInfo source, Object[] before, Object[] after, int rowNumber, int numberOfRows, BitSet includedColumns,
-                              long ts,
+                              Instant ts,
                               BlockingConsumer<SourceRecord> consumer)
                     throws InterruptedException {
                 int count = 0;
+                validateColumnCount(tableSchema, after);
                 Object key = tableSchema.keyFromColumnData(after);
                 Struct valueAfter = tableSchema.valueFromColumnData(after);
                 if (valueAfter != null || key != null) {
@@ -261,7 +275,8 @@ public class RecordMakers {
                     Schema keySchema = tableSchema.keySchema();
                     Map<String, ?> partition = source.partition();
                     Map<String, Object> offset = source.offsetForRow(rowNumber, numberOfRows);
-                    Struct origin = source.struct(id);
+                    source.tableEvent(id);
+                    Struct origin = source.struct();
                     if (key != null && !Objects.equals(key, oldKey)) {
                         // The key has changed, so we need to deal with both the new key and old key.
                         // Consumers may push the events into a system that won't allow both records to exist at the same time,
@@ -283,7 +298,8 @@ public class RecordMakers {
                                 keySchema, key, envelope.schema(), envelope.create(valueAfter, origin, ts));
                         consumer.accept(record);
                         ++count;
-                    } else {
+                    }
+                    else {
                         // The key has not changed, so a simple update is fine ...
                         SourceRecord record = new SourceRecord(partition, getSourceRecordOffset(offset), topicName, partitionNum,
                                 keySchema, key, envelope.schema(), envelope.update(valueBefore, valueAfter, origin, ts));
@@ -295,17 +311,19 @@ public class RecordMakers {
             }
 
             @Override
-            public int delete(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, long ts,
+            public int delete(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, Instant ts,
                               BlockingConsumer<SourceRecord> consumer)
                     throws InterruptedException {
                 int count = 0;
+                validateColumnCount(tableSchema, row);
                 Object key = tableSchema.keyFromColumnData(row);
                 Struct value = tableSchema.valueFromColumnData(row);
                 if (value != null || key != null) {
                     Schema keySchema = tableSchema.keySchema();
                     Map<String, ?> partition = source.partition();
                     Map<String, Object> offset = source.offsetForRow(rowNumber, numberOfRows);
-                    Struct origin = source.struct(id);
+                    source.tableEvent(id);
+                    Struct origin = source.struct();
                     // Send a delete message ...
                     SourceRecord record = new SourceRecord(partition, getSourceRecordOffset(offset), topicName, partitionNum,
                             keySchema, key, envelope.schema(), envelope.delete(value, origin, ts));
@@ -328,6 +346,14 @@ public class RecordMakers {
                 return "RecordMaker.Converter(" + id + ")";
             }
 
+            private void validateColumnCount(TableSchema tableSchema, Object[] row) {
+                final int expectedColumnsCount = schema.tableFor(tableSchema.id()).columns().size();
+                if (expectedColumnsCount != row.length) {
+                    logger.error("Invalid number of columns, expected '{}' arrived '{}'", expectedColumnsCount, row.length);
+                    throw new ConnectException(
+                            "The binlog event does not contain expected number of columns; the internal schema representation is probably out of sync with the real database schema, or the binlog contains events recorded with binlog_row_image other than FULL or the table in question is an NDB table");
+                }
+            }
         };
 
         convertersByTableNumber.put(tableNumber, converter);
@@ -346,7 +372,9 @@ public class RecordMakers {
         return result;
     }
 
-    protected Struct schemaChangeRecordValue(String databaseName, String ddlStatements) {
+    protected Struct schemaChangeRecordValue(String databaseName, Set<TableId> tables, String ddlStatements) {
+        source.databaseEvent(databaseName);
+        source.tableEvent(tables);
         Struct result = new Struct(schemaChangeValueSchema);
         result.put(Fields.SOURCE, source.struct());
         result.put(Fields.DATABASE_NAME, databaseName);
@@ -355,19 +383,19 @@ public class RecordMakers {
     }
 
     protected static interface Converter {
-        int read(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, long ts,
+        int read(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, Instant ts,
                  BlockingConsumer<SourceRecord> consumer)
                 throws InterruptedException;
 
-        int insert(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, long ts,
+        int insert(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, Instant ts,
                    BlockingConsumer<SourceRecord> consumer)
                 throws InterruptedException;
 
-        int update(SourceInfo source, Object[] before, Object[] after, int rowNumber, int numberOfRows, BitSet includedColumns, long ts,
+        int update(SourceInfo source, Object[] before, Object[] after, int rowNumber, int numberOfRows, BitSet includedColumns, Instant ts,
                    BlockingConsumer<SourceRecord> consumer)
                 throws InterruptedException;
 
-        int delete(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, long ts,
+        int delete(SourceInfo source, Object[] row, int rowNumber, int numberOfRows, BitSet includedColumns, Instant ts,
                    BlockingConsumer<SourceRecord> consumer)
                 throws InterruptedException;
 
@@ -396,7 +424,7 @@ public class RecordMakers {
          * @return the number of records produced; will be 0 or more
          * @throws InterruptedException if this thread is interrupted while waiting to give a source record to the consumer
          */
-        public int read(Object[] row, long ts) throws InterruptedException {
+        public int read(Object[] row, Instant ts) throws InterruptedException {
             return read(row, ts, 0, 1);
         }
 
@@ -411,7 +439,7 @@ public class RecordMakers {
          * @return the number of records produced; will be 0 or more
          * @throws InterruptedException if this thread is interrupted while waiting to give a source record to the consumer
          */
-        public int read(Object[] row, long ts, int rowNumber, int numberOfRows) throws InterruptedException {
+        public int read(Object[] row, Instant ts, int rowNumber, int numberOfRows) throws InterruptedException {
             return converter.read(source, row, rowNumber, numberOfRows, includedColumns, ts, consumer);
         }
 
@@ -424,7 +452,7 @@ public class RecordMakers {
          * @return the number of records produced; will be 0 or more
          * @throws InterruptedException if this thread is interrupted while waiting to give a source record to the consumer
          */
-        public int create(Object[] row, long ts) throws InterruptedException {
+        public int create(Object[] row, Instant ts) throws InterruptedException {
             return create(row, ts, 0, 1);
         }
 
@@ -439,7 +467,7 @@ public class RecordMakers {
          * @return the number of records produced; will be 0 or more
          * @throws InterruptedException if this thread is interrupted while waiting to give a source record to the consumer
          */
-        public int create(Object[] row, long ts, int rowNumber, int numberOfRows) throws InterruptedException {
+        public int create(Object[] row, Instant ts, int rowNumber, int numberOfRows) throws InterruptedException {
             return converter.insert(source, row, rowNumber, numberOfRows, includedColumns, ts, consumer);
         }
 
@@ -454,7 +482,7 @@ public class RecordMakers {
          * @return the number of records produced; will be 0 or more
          * @throws InterruptedException if this thread is interrupted while waiting to give a source record to the consumer
          */
-        public int update(Object[] before, Object[] after, long ts) throws InterruptedException {
+        public int update(Object[] before, Object[] after, Instant ts) throws InterruptedException {
             return update(before, after, ts, 0, 1);
         }
 
@@ -471,7 +499,7 @@ public class RecordMakers {
          * @return the number of records produced; will be 0 or more
          * @throws InterruptedException if this thread is interrupted while waiting to give a source record to the consumer
          */
-        public int update(Object[] before, Object[] after, long ts, int rowNumber, int numberOfRows) throws InterruptedException {
+        public int update(Object[] before, Object[] after, Instant ts, int rowNumber, int numberOfRows) throws InterruptedException {
             return converter.update(source, before, after, rowNumber, numberOfRows, includedColumns, ts, consumer);
         }
 
@@ -484,7 +512,7 @@ public class RecordMakers {
          * @return the number of records produced; will be 0 or more
          * @throws InterruptedException if this thread is interrupted while waiting to give a source record to the consumer
          */
-        public int delete(Object[] row, long ts) throws InterruptedException {
+        public int delete(Object[] row, Instant ts) throws InterruptedException {
             return delete(row, ts, 0, 1);
         }
 
@@ -499,7 +527,7 @@ public class RecordMakers {
          * @return the number of records produced; will be 0 or more
          * @throws InterruptedException if this thread is interrupted while waiting to give a source record to the consumer
          */
-        public int delete(Object[] row, long ts, int rowNumber, int numberOfRows) throws InterruptedException {
+        public int delete(Object[] row, Instant ts, int rowNumber, int numberOfRows) throws InterruptedException {
             return converter.delete(source, row, rowNumber, numberOfRows, includedColumns, ts, consumer);
         }
     }

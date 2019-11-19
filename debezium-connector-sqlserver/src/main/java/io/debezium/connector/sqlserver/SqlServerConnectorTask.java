@@ -46,14 +46,16 @@ public class SqlServerConnectorTask extends BaseSourceTask {
     private static final String CONTEXT_NAME = "sql-server-connector-task";
 
     private static enum State {
-        RUNNING, STOPPED;
+        RUNNING,
+        STOPPED;
     }
 
     private final AtomicReference<State> state = new AtomicReference<State>(State.STOPPED);
 
     private volatile SqlServerTaskContext taskContext;
     private volatile ChangeEventQueue<DataChangeEvent> queue;
-    private volatile SqlServerConnection jdbcConnection;
+    private volatile SqlServerConnection dataConnection;
+    private volatile SqlServerConnection metadataConnection;
     private volatile ChangeEventSourceCoordinator coordinator;
     private volatile ErrorHandler errorHandler;
     private volatile SqlServerDatabaseSchema schema;
@@ -81,19 +83,21 @@ public class SqlServerConnectorTask extends BaseSourceTask {
                 .withDefault("database.fetchSize", 10_000)
                 .build();
 
-        final Configuration jdbcConfig = config.filter(x -> !(x.startsWith(DatabaseHistory.CONFIGURATION_FIELD_PREFIX_STRING) || x.equals(HistorizedRelationalDatabaseConnectorConfig.DATABASE_HISTORY.name())))
+        final Configuration jdbcConfig = config.filter(
+                x -> !(x.startsWith(DatabaseHistory.CONFIGURATION_FIELD_PREFIX_STRING) || x.equals(HistorizedRelationalDatabaseConnectorConfig.DATABASE_HISTORY.name())))
                 .subset("database.", true);
-        jdbcConnection = new SqlServerConnection(jdbcConfig);
+        dataConnection = new SqlServerConnection(jdbcConfig);
+        metadataConnection = new SqlServerConnection(jdbcConfig);
         try {
-            jdbcConnection.setAutoCommit(false);
+            dataConnection.setAutoCommit(false);
         }
         catch (SQLException e) {
             throw new ConnectException(e);
         }
-        this.schema = new SqlServerDatabaseSchema(connectorConfig, schemaNameAdjuster, topicSelector, jdbcConnection);
+        this.schema = new SqlServerDatabaseSchema(connectorConfig, schemaNameAdjuster, topicSelector, dataConnection);
         this.schema.initializeStorage();
 
-        final OffsetContext previousOffset = getPreviousOffset(new SqlServerOffsetContext.Loader(connectorConfig.getLogicalName()));
+        final OffsetContext previousOffset = getPreviousOffset(new SqlServerOffsetContext.Loader(connectorConfig));
         if (previousOffset != null) {
             schema.recover(previousOffset);
         }
@@ -125,9 +129,9 @@ public class SqlServerConnectorTask extends BaseSourceTask {
                 errorHandler,
                 SqlServerConnector.class,
                 connectorConfig.getLogicalName(),
-                new SqlServerChangeEventSourceFactory(connectorConfig, jdbcConnection, errorHandler, dispatcher, clock, schema),
-                dispatcher
-        );
+                new SqlServerChangeEventSourceFactory(connectorConfig, dataConnection, metadataConnection, errorHandler, dispatcher, clock, schema),
+                dispatcher,
+                schema);
 
         coordinator.start(taskContext, this.queue, new SqlServerEventMetadataProvider());
     }
@@ -158,8 +162,8 @@ public class SqlServerConnectorTask extends BaseSourceTask {
         final List<DataChangeEvent> records = queue.poll();
 
         final List<SourceRecord> sourceRecords = records.stream()
-            .map(DataChangeEvent::getRecord)
-            .collect(Collectors.toList());
+                .map(DataChangeEvent::getRecord)
+                .collect(Collectors.toList());
 
         if (!sourceRecords.isEmpty()) {
             this.lastOffset = sourceRecords.get(sourceRecords.size() - 1).sourceOffset();
@@ -192,7 +196,7 @@ public class SqlServerConnectorTask extends BaseSourceTask {
             }
         }
         catch (InterruptedException e) {
-            Thread.interrupted();
+            Thread.currentThread().interrupt();
             LOGGER.error("Interrupted while stopping coordinator", e);
             throw new ConnectException("Interrupted while stopping coordinator, failing the task");
         }
@@ -203,17 +207,26 @@ public class SqlServerConnectorTask extends BaseSourceTask {
             }
         }
         catch (InterruptedException e) {
-            Thread.interrupted();
+            Thread.currentThread().interrupt();
             LOGGER.error("Interrupted while stopping", e);
         }
 
         try {
-            if (jdbcConnection != null) {
-                jdbcConnection.close();
+            if (dataConnection != null) {
+                dataConnection.close();
             }
         }
         catch (SQLException e) {
             LOGGER.error("Exception while closing JDBC connection", e);
+        }
+
+        try {
+            if (metadataConnection != null) {
+                metadataConnection.close();
+            }
+        }
+        catch (SQLException e) {
+            LOGGER.error("Exception while closing JDBC metadata connection", e);
         }
 
         if (schema != null) {

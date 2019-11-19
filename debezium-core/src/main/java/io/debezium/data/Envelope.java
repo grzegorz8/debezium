@@ -5,6 +5,7 @@
  */
 package io.debezium.data;
 
+import java.time.Instant;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -52,7 +53,9 @@ public final class Envelope {
 
         public static Operation forCode(String code) {
             for (Operation op : Operation.values()) {
-                if (op.code().equalsIgnoreCase(code)) return op;
+                if (op.code().equalsIgnoreCase(code)) {
+                    return op;
+                }
             }
             return null;
         }
@@ -211,7 +214,9 @@ public final class Envelope {
             }
 
             private void checkFieldIsDefined(String fieldName, boolean required) {
-                if (builder.field(fieldName) == null) missingFields.add(fieldName);
+                if (builder.field(fieldName) == null) {
+                    missingFields.add(fieldName);
+                }
             }
         };
     }
@@ -239,12 +244,16 @@ public final class Envelope {
      * @param timestamp the timestamp for this message; may be null
      * @return the read message; never null
      */
-    public Struct read(Object record, Struct source, Long timestamp) {
+    public Struct read(Object record, Struct source, Instant timestamp) {
         Struct struct = new Struct(schema);
         struct.put(FieldName.OPERATION, Operation.READ.code());
         struct.put(FieldName.AFTER, record);
-        if (source != null) struct.put(FieldName.SOURCE, source);
-        if (timestamp != null) struct.put(FieldName.TIMESTAMP, timestamp);
+        if (source != null) {
+            struct.put(FieldName.SOURCE, source);
+        }
+        if (timestamp != null) {
+            struct.put(FieldName.TIMESTAMP, timestamp.toEpochMilli());
+        }
         return struct;
     }
 
@@ -256,12 +265,16 @@ public final class Envelope {
      * @param timestamp the timestamp for this message; may be null
      * @return the create message; never null
      */
-    public Struct create(Object record, Struct source, Long timestamp) {
+    public Struct create(Object record, Struct source, Instant timestamp) {
         Struct struct = new Struct(schema);
         struct.put(FieldName.OPERATION, Operation.CREATE.code());
         struct.put(FieldName.AFTER, record);
-        if (source != null) struct.put(FieldName.SOURCE, source);
-        if (timestamp != null) struct.put(FieldName.TIMESTAMP, timestamp);
+        if (source != null) {
+            struct.put(FieldName.SOURCE, source);
+        }
+        if (timestamp != null) {
+            struct.put(FieldName.TIMESTAMP, timestamp.toEpochMilli());
+        }
         return struct;
     }
 
@@ -274,13 +287,19 @@ public final class Envelope {
      * @param timestamp the timestamp for this message; may be null
      * @return the update message; never null
      */
-    public Struct update(Object before, Struct after, Struct source, Long timestamp) {
+    public Struct update(Object before, Struct after, Struct source, Instant timestamp) {
         Struct struct = new Struct(schema);
         struct.put(FieldName.OPERATION, Operation.UPDATE.code());
-        if (before != null) struct.put(FieldName.BEFORE, before);
+        if (before != null) {
+            struct.put(FieldName.BEFORE, before);
+        }
         struct.put(FieldName.AFTER, after);
-        if (source != null) struct.put(FieldName.SOURCE, source);
-        if (timestamp != null) struct.put(FieldName.TIMESTAMP, timestamp);
+        if (source != null) {
+            struct.put(FieldName.SOURCE, source);
+        }
+        if (timestamp != null) {
+            struct.put(FieldName.TIMESTAMP, timestamp.toEpochMilli());
+        }
         return struct;
     }
 
@@ -292,12 +311,18 @@ public final class Envelope {
      * @param timestamp the timestamp for this message; may be null
      * @return the delete message; never null
      */
-    public Struct delete(Object before, Struct source, Long timestamp) {
+    public Struct delete(Object before, Struct source, Instant timestamp) {
         Struct struct = new Struct(schema);
         struct.put(FieldName.OPERATION, Operation.DELETE.code());
-        if (before != null) struct.put(FieldName.BEFORE, before);
-        if (source != null) struct.put(FieldName.SOURCE, source);
-        if (timestamp != null) struct.put(FieldName.TIMESTAMP, timestamp);
+        if (before != null) {
+            struct.put(FieldName.BEFORE, before);
+        }
+        if (source != null) {
+            struct.put(FieldName.SOURCE, source);
+        }
+        if (timestamp != null) {
+            struct.put(FieldName.TIMESTAMP, timestamp.toEpochMilli());
+        }
         return struct;
     }
 

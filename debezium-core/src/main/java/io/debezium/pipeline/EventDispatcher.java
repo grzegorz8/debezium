@@ -6,6 +6,7 @@
 package io.debezium.pipeline;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 import org.apache.kafka.connect.data.Schema;
@@ -15,7 +16,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.debezium.config.CommonConnectorConfig;
+import io.debezium.connector.SnapshotRecord;
 import io.debezium.connector.base.ChangeEventQueue;
+import io.debezium.data.Envelope;
 import io.debezium.data.Envelope.Operation;
 import io.debezium.heartbeat.Heartbeat;
 import io.debezium.pipeline.source.spi.DataChangeEventListener;
@@ -53,6 +56,8 @@ public class EventDispatcher<T extends DataCollectionId> {
     private final ChangeEventCreator changeEventCreator;
     private final Heartbeat heartbeat;
     private DataChangeEventListener eventListener = DataChangeEventListener.NO_OP;
+    private final boolean emitTombstonesOnDelete;
+    private final InconsistentSchemaHandler<T> inconsistentSchemaHandler;
 
     /**
      * Change event receiver for events dispatched from a streaming change event source.
@@ -60,8 +65,14 @@ public class EventDispatcher<T extends DataCollectionId> {
     private final StreamingChangeRecordReceiver streamingReceiver;
 
     public EventDispatcher(CommonConnectorConfig connectorConfig, TopicSelector<T> topicSelector,
-            DatabaseSchema<T> schema, ChangeEventQueue<DataChangeEvent> queue, DataCollectionFilter<T> filter,
-            ChangeEventCreator changeEventCreator) {
+                           DatabaseSchema<T> schema, ChangeEventQueue<DataChangeEvent> queue, DataCollectionFilter<T> filter,
+                           ChangeEventCreator changeEventCreator) {
+        this(connectorConfig, topicSelector, schema, queue, filter, changeEventCreator, null);
+    }
+
+    public EventDispatcher(CommonConnectorConfig connectorConfig, TopicSelector<T> topicSelector,
+                           DatabaseSchema<T> schema, ChangeEventQueue<DataChangeEvent> queue, DataCollectionFilter<T> filter,
+                           ChangeEventCreator changeEventCreator, InconsistentSchemaHandler<T> inconsistentSchemaHandler) {
         this.topicSelector = topicSelector;
         this.schema = schema;
         this.historizedSchema = schema instanceof HistorizedDatabaseSchema
@@ -71,6 +82,8 @@ public class EventDispatcher<T extends DataCollectionId> {
         this.filter = filter;
         this.changeEventCreator = changeEventCreator;
         this.streamingReceiver = new StreamingChangeRecordReceiver();
+        this.emitTombstonesOnDelete = connectorConfig.isEmitTombstoneOnDelete();
+        this.inconsistentSchemaHandler = inconsistentSchemaHandler != null ? inconsistentSchemaHandler : this::errorOnMissingSchema;
 
         heartbeat = Heartbeat.create(connectorConfig.getConfig(), topicSelector.getHeartbeatTopic(),
                 connectorConfig.getLogicalName());
@@ -82,15 +95,16 @@ public class EventDispatcher<T extends DataCollectionId> {
         DataCollectionSchema dataCollectionSchema = schema.schemaFor(dataCollectionId);
 
         // TODO handle as per inconsistent schema info option
-        if(dataCollectionSchema == null) {
-            throw new IllegalArgumentException("No metadata registered for captured table " + dataCollectionId);
+        if (dataCollectionSchema == null) {
+            errorOnMissingSchema(dataCollectionId, changeRecordEmitter);
         }
 
         changeRecordEmitter.emitChangeRecords(dataCollectionSchema, new Receiver() {
 
             @Override
             public void changeRecord(DataCollectionSchema schema, Operation operation, Object key, Struct value,
-                    OffsetContext offset) throws InterruptedException {
+                                     OffsetContext offset)
+                    throws InterruptedException {
                 eventListener.onEvent(dataCollectionSchema.id(), offset, key, value);
                 receiver.changeRecord(dataCollectionSchema, operation, key, value, offset);
             }
@@ -107,54 +121,82 @@ public class EventDispatcher<T extends DataCollectionId> {
      * case, one event will be emitted, but e.g. in case of PK updates, it may be a deletion and a creation event). The
      * receiving coordinator creates {@link SourceRecord}s for all emitted events and passes them to this dispatcher's
      * {@link ChangeEventCreator} for converting them into data change events.
+     *
+     * @return {@code true} if an event was dispatched (i.e. sent to the message broker), {@code false} otherwise.
      */
-    public void dispatchDataChangeEvent(T dataCollectionId, ChangeRecordEmitter changeRecordEmitter) throws InterruptedException {
-
-        if(!filter.isIncluded(dataCollectionId)) {
-            eventListener.onSkippedEvent("source = " + dataCollectionId);
-            LOGGER.trace("Skipping data change event for {}", dataCollectionId);
+    public boolean dispatchDataChangeEvent(T dataCollectionId, ChangeRecordEmitter changeRecordEmitter) throws InterruptedException {
+        boolean handled = false;
+        if (!filter.isIncluded(dataCollectionId)) {
+            LOGGER.trace("Filtered data change event for {}", dataCollectionId);
+            eventListener.onFilteredEvent("source = " + dataCollectionId);
         }
         else {
             DataCollectionSchema dataCollectionSchema = schema.schemaFor(dataCollectionId);
 
             // TODO handle as per inconsistent schema info option
-            if(dataCollectionSchema == null) {
-                throw new IllegalArgumentException("No metadata registered for captured table " + dataCollectionId);
+            if (dataCollectionSchema == null) {
+                final Optional<DataCollectionSchema> replacementSchema = inconsistentSchemaHandler.handle(dataCollectionId, changeRecordEmitter);
+                if (!replacementSchema.isPresent()) {
+                    return false;
+                }
+                dataCollectionSchema = replacementSchema.get();
             }
 
             changeRecordEmitter.emitChangeRecords(dataCollectionSchema, new Receiver() {
 
                 @Override
                 public void changeRecord(DataCollectionSchema schema, Operation operation, Object key, Struct value,
-                        OffsetContext offset) throws InterruptedException {
+                                         OffsetContext offset)
+                        throws InterruptedException {
                     eventListener.onEvent(dataCollectionId, offset, key, value);
                     streamingReceiver.changeRecord(schema, operation, key, value, offset);
                 }
             });
+            handled = true;
         }
 
         heartbeat.heartbeat(
                 changeRecordEmitter.getOffset().getPartition(),
                 changeRecordEmitter.getOffset().getOffset(),
-                this::enqueueHeartbeat
-        );
+                this::enqueueHeartbeat);
+
+        return handled;
+    }
+
+    public Optional<DataCollectionSchema> errorOnMissingSchema(T dataCollectionId, ChangeRecordEmitter changeRecordEmitter) {
+        eventListener.onErroneousEvent("source = " + dataCollectionId);
+        throw new IllegalArgumentException("No metadata registered for captured table " + dataCollectionId);
+    }
+
+    public Optional<DataCollectionSchema> ignoreMissingSchema(T dataCollectionId, ChangeRecordEmitter changeRecordEmitter) {
+        return Optional.empty();
     }
 
     public void dispatchSchemaChangeEvent(T dataCollectionId, SchemaChangeEventEmitter schemaChangeEventEmitter) throws InterruptedException {
-        if(!filter.isIncluded(dataCollectionId)) {
-            LOGGER.trace("Skipping data change event for {}", dataCollectionId);
+        if (!filter.isIncluded(dataCollectionId)) {
+            LOGGER.trace("Filtering schema change event for {}", dataCollectionId);
             return;
         }
 
         schemaChangeEventEmitter.emitSchemaChangeEvent(new SchemaChangeEventReceiver());
     }
 
-    public void dispatchHeartbeatEvent(OffsetContext offset) throws InterruptedException {
+    public void alwaysDispatchHeartbeatEvent(OffsetContext offset) throws InterruptedException {
         heartbeat.forcedBeat(
                 offset.getPartition(),
                 offset.getOffset(),
-                this::enqueueHeartbeat
-        );
+                this::enqueueHeartbeat);
+    }
+
+    public void dispatchHeartbeatEvent(OffsetContext offset) throws InterruptedException {
+        heartbeat.heartbeat(
+                offset.getPartition(),
+                offset.getOffset(),
+                this::enqueueHeartbeat);
+    }
+
+    public boolean heartbeatsEnabled() {
+        return heartbeat.isEnabled();
     }
 
     private void enqueueHeartbeat(SourceRecord record) throws InterruptedException {
@@ -173,11 +215,11 @@ public class EventDispatcher<T extends DataCollectionId> {
     private final class StreamingChangeRecordReceiver implements ChangeRecordEmitter.Receiver {
 
         @Override
-        public void changeRecord(DataCollectionSchema dataCollectionSchema, Operation operation, Object key, Struct value, OffsetContext offsetContext) throws InterruptedException {
-            Objects.requireNonNull(key, "key must not be null");
-            Objects.requireNonNull(value, "key must not be null");
+        public void changeRecord(DataCollectionSchema dataCollectionSchema, Operation operation, Object key, Struct value, OffsetContext offsetContext)
+                throws InterruptedException {
+            Objects.requireNonNull(value, "value must not be null");
 
-            LOGGER.trace( "Received change record for {} operation on key {}", operation, key);
+            LOGGER.trace("Received change record for {} operation on key {}", operation, key);
 
             Schema keySchema = dataCollectionSchema.keySchema();
             String topicName = topicSelector.topicNameFor((T) dataCollectionSchema.id());
@@ -187,9 +229,6 @@ public class EventDispatcher<T extends DataCollectionId> {
 
             queue.enqueue(changeEventCreator.createDataChangeEvent(record));
 
-            // TODO handle option
-            boolean emitTombstonesOnDelete = true;
-
             if (emitTombstonesOnDelete && operation == Operation.DELETE) {
                 SourceRecord tombStone = record.newRecord(
                         record.topic(),
@@ -198,8 +237,7 @@ public class EventDispatcher<T extends DataCollectionId> {
                         record.key(),
                         null, // value schema
                         null, // value
-                        record.timestamp()
-                );
+                        record.timestamp());
 
                 queue.enqueue(changeEventCreator.createDataChangeEvent(tombStone));
             }
@@ -211,13 +249,13 @@ public class EventDispatcher<T extends DataCollectionId> {
         private Supplier<DataChangeEvent> bufferedEvent;
 
         @Override
-        public void changeRecord(DataCollectionSchema dataCollectionSchema, Operation operation, Object key, Struct value, OffsetContext offsetContext) throws InterruptedException {
-            Objects.requireNonNull(key, "key must not be null");
-            Objects.requireNonNull(value, "key must not be null");
+        public void changeRecord(DataCollectionSchema dataCollectionSchema, Operation operation, Object key, Struct value, OffsetContext offsetContext)
+                throws InterruptedException {
+            Objects.requireNonNull(value, "value must not be null");
 
-            LOGGER.trace( "Received change record for {} operation on key {}", operation, key);
+            LOGGER.trace("Received change record for {} operation on key {}", operation, key);
 
-            if(bufferedEvent != null) {
+            if (bufferedEvent != null) {
                 queue.enqueue(bufferedEvent.get());
             }
 
@@ -228,15 +266,26 @@ public class EventDispatcher<T extends DataCollectionId> {
             bufferedEvent = () -> {
                 SourceRecord record = new SourceRecord(offsetContext.getPartition(), offsetContext.getOffset(),
                         topicName, null, keySchema, key, dataCollectionSchema.getEnvelopeSchema().schema(), value);
-
                 return changeEventCreator.createDataChangeEvent(record);
             };
         }
 
         @Override
         public void completeSnapshot() throws InterruptedException {
-            if(bufferedEvent != null) {
-                queue.enqueue(bufferedEvent.get());
+            if (bufferedEvent != null) {
+                // It is possible that the last snapshotted table was empty
+                // this way we ensure that the last event is always marked as last
+                // even if it originates form non-last table
+                final DataChangeEvent event = bufferedEvent.get();
+                final Struct envelope = (Struct) event.getRecord().value();
+                if (envelope.schema().field(Envelope.FieldName.SOURCE) != null) {
+                    final Struct source = envelope.getStruct(Envelope.FieldName.SOURCE);
+                    final SnapshotRecord snapshot = SnapshotRecord.fromSource(source);
+                    if (snapshot == SnapshotRecord.TRUE) {
+                        SnapshotRecord.LAST.toSource(source);
+                    }
+                }
+                queue.enqueue(event);
                 bufferedEvent = null;
             }
         }
@@ -258,4 +307,17 @@ public class EventDispatcher<T extends DataCollectionId> {
     public void setEventListener(DataChangeEventListener eventListener) {
         this.eventListener = eventListener;
     }
+
+    /**
+     * Reaction to an incoming change event for which schema is not found
+     */
+    @FunctionalInterface
+    public static interface InconsistentSchemaHandler<T extends DataCollectionId> {
+
+        /**
+         * @return collection schema if the schema was updated and event can be processed, {@code empty} to skip the processing
+         */
+        Optional<DataCollectionSchema> handle(T dataCollectionId, ChangeRecordEmitter changeRecordEmitter);
+    }
+
 }

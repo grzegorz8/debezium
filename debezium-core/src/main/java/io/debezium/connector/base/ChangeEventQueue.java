@@ -156,7 +156,8 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
                 LOGGER.debug("checking for more records...");
             }
             return records;
-        } finally {
+        }
+        finally {
             previousContext.restore();
         }
     }
@@ -167,7 +168,7 @@ public class ChangeEventQueue<T> implements ChangeEventQueueMetrics {
 
     private void throwProducerFailureIfPresent() {
         if (producerFailure != null) {
-            throw new ConnectException("An exception ocurred in the change event producer. This connector will be stopped.", producerFailure);
+            throw new ConnectException("An exception occurred in the change event producer. This connector will be stopped.", producerFailure);
         }
     }
 

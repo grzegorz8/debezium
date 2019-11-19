@@ -52,8 +52,8 @@ public class AlterTableParserListener extends MySqlParserBaseListener {
     @Override
     public void enterAlterTable(MySqlParser.AlterTableContext ctx) {
         final TableId tableId = parser.parseQualifiedTableId(ctx.tableName().fullId());
-        if (!parser.getTableFilter().isIncluded(tableId)) {
-            LOG.debug("Ignoring ALTER TABLE statement for non-whitelisted table {}", tableId);
+        if (parser.databaseTables().forTable(tableId) == null) {
+            LOG.debug("Ignoring ALTER TABLE statement for non-captured table {}", tableId);
             return;
         }
         tableEditor = parser.databaseTables().editTable(tableId);
@@ -72,6 +72,7 @@ public class AlterTableParserListener extends MySqlParserBaseListener {
             parser.signalAlterTable(tableEditor.tableId(), null, ctx.getParent());
         }, tableEditor);
         super.exitAlterTable(ctx);
+        tableEditor = null;
     }
 
     @Override
@@ -199,9 +200,12 @@ public class AlterTableParserListener extends MySqlParserBaseListener {
     public void enterAlterByModifyColumn(MySqlParser.AlterByModifyColumnContext ctx) {
         parser.runIfNotNull(() -> {
             String columnName = parser.parseName(ctx.uid(0));
-            Column column = tableEditor.columnWithName(columnName);
-            if (column != null) {
-                columnDefinitionListener = new ColumnDefinitionParserListener(tableEditor, column.edit(), parser.dataTypeResolver(), parser.getConverters());
+            Column existingColumn = tableEditor.columnWithName(columnName);
+            if (existingColumn != null) {
+                ColumnEditor columnEditor = existingColumn.edit();
+                columnEditor.unsetDefaultValue();
+
+                columnDefinitionListener = new ColumnDefinitionParserListener(tableEditor, columnEditor, parser.dataTypeResolver(), parser.getConverters());
                 listeners.add(columnDefinitionListener);
             }
             else {
@@ -303,7 +307,7 @@ public class AlterTableParserListener extends MySqlParserBaseListener {
                 // definition; so in fact it's arguably not correct to use edit() on the existing column to begin with, but
                 // I'm going to leave this as is for now, to be prepared for the ability of updating column definitions in 8.0
                 ColumnEditor columnEditor = existingColumn.edit();
-//                columnEditor.unsetDefaultValue();
+                // columnEditor.unsetDefaultValue();
 
                 columnDefinitionListener = new ColumnDefinitionParserListener(tableEditor, columnEditor, parser.dataTypeResolver(), parser.getConverters());
                 listeners.add(columnDefinitionListener);

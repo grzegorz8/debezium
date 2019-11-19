@@ -19,6 +19,7 @@ import java.util.function.Predicate;
 import org.apache.kafka.connect.data.Schema;
 
 import io.debezium.annotation.ThreadSafe;
+import io.debezium.function.Predicates;
 import io.debezium.schema.DataCollectionFilters.DataCollectionFilter;
 import io.debezium.schema.DatabaseSchema;
 import io.debezium.util.Collect;
@@ -64,6 +65,7 @@ public final class Tables {
      */
     @FunctionalInterface
     public static interface ColumnNameFilter {
+
         /**
          * Determine whether the named column should be included in the table's {@link Schema} definition.
          *
@@ -76,6 +78,21 @@ public final class Tables {
          * @return {@code true} if the table should be included, or {@code false} if the table should be excluded
          */
         boolean matches(String catalogName, String schemaName, String tableName, String columnName);
+
+        /**
+         * Build the {@link ColumnNameFilter} that determines whether a column identified by a given {@link ColumnId} is to be included,
+         * using the given comma-separated regular expression patterns defining which columns (if any) should be <i>excluded</i>.
+         * <p>
+         * Note that this predicate is completely independent of the table selection predicate, so it is expected that this predicate
+         * be used only <i>after</i> the table selection predicate determined the table containing the column(s) is to be used.
+         *
+         * @param fullyQualifiedColumnNames the comma-separated list of fully-qualified column names to exclude; may be null or
+         * @return a column name filter; never null
+         */
+        public static ColumnNameFilter getInstance(String fullyQualifiedColumnNames) {
+            Predicate<ColumnId> delegate = Predicates.excludes(fullyQualifiedColumnNames, ColumnId::toString);
+            return (catalogName, schemaName, tableName, columnName) -> delegate.test(new ColumnId(new TableId(catalogName, schemaName, tableName), columnName));
+        }
     }
 
     private final FunctionalReadWriteLock lock = FunctionalReadWriteLock.reentrant();
@@ -149,10 +166,10 @@ public final class Tables {
         return lock.write(() -> {
             TableImpl updated = new TableImpl(tableId, columnDefs, primaryKeyColumnNames, defaultCharsetName);
             TableImpl existing = tablesByTableId.get(tableId);
-            if ( existing == null || !existing.equals(updated) ) {
+            if (existing == null || !existing.equals(updated)) {
                 // Our understanding of the table has changed ...
                 changes.add(tableId);
-                tablesByTableId.put(tableId,updated);
+                tablesByTableId.put(tableId, updated);
             }
             return tablesByTableId.get(tableId);
         });
@@ -169,7 +186,8 @@ public final class Tables {
             TableImpl updated = new TableImpl(table);
             try {
                 return tablesByTableId.put(updated.id(), updated);
-            } finally {
+            }
+            finally {
                 changes.add(updated.id());
             }
         });
@@ -202,13 +220,16 @@ public final class Tables {
     public Table renameTable(TableId existingTableId, TableId newTableId) {
         return lock.write(() -> {
             Table existing = forTable(existingTableId);
-            if (existing == null) return null;
+            if (existing == null) {
+                return null;
+            }
             tablesByTableId.remove(existing.id());
             TableImpl updated = new TableImpl(newTableId, existing.columns(),
-                                              existing.primaryKeyColumnNames(), existing.defaultCharsetName());
+                    existing.primaryKeyColumnNames(), existing.defaultCharsetName());
             try {
                 return tablesByTableId.put(updated.id(), updated);
-            } finally {
+            }
+            finally {
                 changes.add(existingTableId);
                 changes.add(updated.id());
             }
@@ -229,7 +250,7 @@ public final class Tables {
             Table updated = changer.apply(existing);
             if (updated != existing) {
                 tablesByTableId.put(tableId, new TableImpl(tableId, updated.columns(),
-                                                           updated.primaryKeyColumnNames(), updated.defaultCharsetName()));
+                        updated.primaryKeyColumnNames(), updated.defaultCharsetName()));
             }
             changes.add(tableId);
             return existing;
@@ -315,7 +336,9 @@ public final class Tables {
 
     @Override
     public boolean equals(Object obj) {
-        if (obj == this) return true;
+        if (obj == this) {
+            return true;
+        }
         if (obj instanceof Tables) {
             Tables that = (Tables) obj;
             return this.tablesByTableId.equals(that.tablesByTableId);
@@ -324,7 +347,9 @@ public final class Tables {
     }
 
     public Tables subset(TableFilter filter) {
-        if (filter == null) return this;
+        if (filter == null) {
+            return this;
+        }
         return lock.read(() -> {
             Tables result = new Tables(tableIdCaseInsensitive);
             tablesByTableId.forEach((tableId, table) -> {
@@ -376,9 +401,9 @@ public final class Tables {
         }
 
         public void putAll(TablesById tablesByTableId) {
-            if(tableIdCaseInsensitive) {
+            if (tableIdCaseInsensitive) {
                 tablesByTableId.values.entrySet()
-                    .forEach(e -> put(e.getKey().toLowercase(), e.getValue()));
+                        .forEach(e -> put(e.getKey().toLowercase(), e.getValue()));
             }
             else {
                 values.putAll(tablesByTableId.values);

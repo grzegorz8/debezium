@@ -14,6 +14,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.kafka.connect.data.Struct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.debezium.annotation.ThreadSafe;
 import io.debezium.connector.base.ChangeEventQueueMetrics;
@@ -27,7 +29,9 @@ import io.debezium.schema.DataCollectionId;
  * @author Randall Hauch, Jiri Pechanec
  */
 @ThreadSafe
-public class StreamingChangeEventSourceMetrics extends Metrics implements StreamingChangeEventSourceMetricsMXBean, DataChangeEventListener {
+public class StreamingChangeEventSourceMetrics extends PipelineMetrics implements StreamingChangeEventSourceMetricsMXBean, DataChangeEventListener {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(StreamingChangeEventSourceMetrics.class);
 
     private final AtomicBoolean connected = new AtomicBoolean();
     private final AtomicReference<Duration> lagBehindSource = new AtomicReference<>();
@@ -35,7 +39,8 @@ public class StreamingChangeEventSourceMetrics extends Metrics implements Stream
     private final AtomicReference<Map<String, String>> sourceEventPosition = new AtomicReference<Map<String, String>>(Collections.emptyMap());
     private final AtomicReference<String> lastTransactionId = new AtomicReference<>();
 
-    public <T extends CdcSourceTaskContext> StreamingChangeEventSourceMetrics(T taskContext, ChangeEventQueueMetrics changeEventQueueMetrics, EventMetadataProvider metadataProvider) {
+    public <T extends CdcSourceTaskContext> StreamingChangeEventSourceMetrics(T taskContext, ChangeEventQueueMetrics changeEventQueueMetrics,
+                                                                              EventMetadataProvider metadataProvider) {
         super(taskContext, "streaming", changeEventQueueMetrics, metadataProvider);
     }
 
@@ -51,6 +56,7 @@ public class StreamingChangeEventSourceMetrics extends Metrics implements Stream
 
     public void connected(boolean connected) {
         this.connected.set(connected);
+        LOGGER.info("Connected metrics set to '{}'", this.connected.get());
     }
 
     @Override

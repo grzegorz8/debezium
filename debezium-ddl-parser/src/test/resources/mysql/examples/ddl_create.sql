@@ -12,6 +12,10 @@ create table child_table(id int unsigned auto_increment primary key, id_parent i
 create table `another some table $$` like `some table $$`;
 create table `actor` (`last_update` timestamp default CURRENT_TIMESTAMP, `birthday` datetime default CURRENT_TIMESTAMP ON UPDATE LOCALTIMESTAMP);
 create table boolean_table(c1 bool, c2 boolean default true);
+create table table_with_character_set_eq (id int, data varchar(50)) character set = default;
+create table table_with_character_set (id int, data varchar(50)) character set default;
+create table table_with_visible_index (id int, data varchar(50), UNIQUE INDEX `data_UNIQUE` (`data` ASC) VISIBLE);
+create table table_with_index (id int, data varchar(50), UNIQUE INDEX `data_UNIQUE` (`data` ASC));
 #end
 #begin
 -- Rename table
@@ -34,6 +38,8 @@ create schema if not exists myschema;
 create schema `select` default character set = utf8;
 create database if not exists `current_date` character set cp1251;
 create database super default character set utf8 collate = utf8_bin character set utf8 collate utf8_bin;
+create database db_with_character_set_eq character set = DEFAULT;
+create database db_with_character_set character set default;
 #end
 #begin
 -- Create event 1
@@ -87,6 +93,11 @@ create trigger trg_my1 before delete on test.t1 for each row begin insert into l
 create definer = current_user() trigger trg_my2 after insert on test.t2 for each row insert into log_table values (concat("inserted into table test.t2 values: (1c, _) = (", cast(NEW.col1 as char(100)), ", ", convert(new.`_`, char(100)), ")"));
 #end
 #begin
+-- Create trigger 3
+-- delimiter //
+CREATE TRIGGER mask_private_data BEFORE INSERT ON users FOR EACH ROW BEGIN SET NEW.phone = CONCAT('555', NEW.id); END; -- //-- delimiter ;
+#end
+#begin
 -- Create view
 create or replace view my_view1 as select 1 union select 2 limit 0,5;
 create algorithm = merge view my_view2(col1, col2) as select * from t2 with check option;
@@ -94,4 +105,12 @@ create or replace definer = 'ivan'@'%' view my_view3 as select count(*) from t3;
 create or replace definer = current_user sql security invoker view my_view4(c1, 1c, _, c1_2) 
 	as select * from  (t1 as tt1, t2 as tt2) inner join t1 on t1.col1 = tt1.col1;
 
+#end
+#begin
+-- Create function
+-- delimiter //
+CREATE FUNCTION `func1`() RETURNS varchar(5) CHARSET utf8 COLLATE utf8_unicode_ci
+BEGIN
+	RETURN '12345';
+END; -- //-- delimiter ;
 #end

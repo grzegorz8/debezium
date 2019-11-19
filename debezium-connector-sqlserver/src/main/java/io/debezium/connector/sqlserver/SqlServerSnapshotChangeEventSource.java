@@ -10,7 +10,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Savepoint;
 import java.sql.Statement;
-import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -20,16 +20,15 @@ import org.slf4j.LoggerFactory;
 import io.debezium.connector.sqlserver.SqlServerConnectorConfig.SnapshotIsolationMode;
 import io.debezium.pipeline.EventDispatcher;
 import io.debezium.pipeline.source.spi.SnapshotProgressListener;
-import io.debezium.pipeline.spi.ChangeRecordEmitter;
 import io.debezium.pipeline.spi.OffsetContext;
-import io.debezium.relational.HistorizedRelationalSnapshotChangeEventSource;
+import io.debezium.relational.RelationalSnapshotChangeEventSource;
 import io.debezium.relational.Table;
 import io.debezium.relational.TableId;
 import io.debezium.schema.SchemaChangeEvent;
 import io.debezium.schema.SchemaChangeEvent.SchemaChangeEventType;
 import io.debezium.util.Clock;
 
-public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnapshotChangeEventSource {
+public class SqlServerSnapshotChangeEventSource extends RelationalSnapshotChangeEventSource {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SqlServerSnapshotChangeEventSource.class);
 
@@ -41,7 +40,9 @@ public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnap
     private final SqlServerConnectorConfig connectorConfig;
     private final SqlServerConnection jdbcConnection;
 
-    public SqlServerSnapshotChangeEventSource(SqlServerConnectorConfig connectorConfig, SqlServerOffsetContext previousOffset, SqlServerConnection jdbcConnection, SqlServerDatabaseSchema schema, EventDispatcher<TableId> dispatcher, Clock clock, SnapshotProgressListener snapshotProgressListener) {
+    public SqlServerSnapshotChangeEventSource(SqlServerConnectorConfig connectorConfig, SqlServerOffsetContext previousOffset, SqlServerConnection jdbcConnection,
+                                              SqlServerDatabaseSchema schema, EventDispatcher<TableId> dispatcher, Clock clock,
+                                              SnapshotProgressListener snapshotProgressListener) {
         super(connectorConfig, previousOffset, jdbcConnection, schema, dispatcher, clock, snapshotProgressListener);
         this.connectorConfig = connectorConfig;
         this.jdbcConnection = jdbcConnection;
@@ -79,7 +80,7 @@ public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnap
 
     @Override
     protected void connectionCreated(SnapshotContext snapshotContext) throws Exception {
-        ((SqlServerSnapshotContext)snapshotContext).isolationLevelBeforeStart = jdbcConnection.connection().getTransactionIsolation();
+        ((SqlServerSnapshotContext) snapshotContext).isolationLevelBeforeStart = jdbcConnection.connection().getTransactionIsolation();
 
         if (connectorConfig.getSnapshotIsolationMode() == SnapshotIsolationMode.SNAPSHOT) {
             // Terminate any transaction in progress so we can change the isolation level
@@ -93,7 +94,7 @@ public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnap
 
     @Override
     protected Set<TableId> getAllTableIds(SnapshotContext ctx) throws Exception {
-        return jdbcConnection.readTableNames(ctx.catalogName, null, null, new String[] {"TABLE"});
+        return jdbcConnection.readTableNames(ctx.catalogName, null, null, new String[]{ "TABLE" });
     }
 
     @Override
@@ -108,8 +109,10 @@ public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnap
         }
         else if (connectorConfig.getSnapshotIsolationMode() == SnapshotIsolationMode.EXCLUSIVE
                 || connectorConfig.getSnapshotIsolationMode() == SnapshotIsolationMode.REPEATABLE_READ) {
+            LOGGER.info("Setting locking timeout to {} s", connectorConfig.snapshotLockTimeout().getSeconds());
+            jdbcConnection.execute("SET LOCK_TIMEOUT " + connectorConfig.snapshotLockTimeout().toMillis());
             jdbcConnection.connection().setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
-            ((SqlServerSnapshotContext)snapshotContext).preSchemaSnapshotSavepoint = jdbcConnection.connection().setSavepoint("dbz_schema_snapshot");
+            ((SqlServerSnapshotContext) snapshotContext).preSchemaSnapshotSavepoint = jdbcConnection.connection().setSavepoint("dbz_schema_snapshot");
 
             LOGGER.info("Executing schema locking");
             try (Statement statement = jdbcConnection.connection().createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)) {
@@ -120,7 +123,7 @@ public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnap
 
                     LOGGER.info("Locking table {}", tableId);
 
-                    String query = String.format("SELECT * FROM [%s].[%s] WITH (TABLOCKX)", tableId.schema(), tableId.table());
+                    String query = String.format("SELECT TOP(0) * FROM [%s].[%s] WITH (TABLOCKX)", tableId.schema(), tableId.table());
                     statement.executeQuery(query).close();
                 }
             }
@@ -135,7 +138,7 @@ public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnap
         // Exclusive mode: locks should be kept until the end of transaction.
         // read_uncommitted mode; snapshot mode: no locks have been acquired.
         if (connectorConfig.getSnapshotIsolationMode() == SnapshotIsolationMode.REPEATABLE_READ) {
-            jdbcConnection.connection().rollback(((SqlServerSnapshotContext)snapshotContext).preSchemaSnapshotSavepoint);
+            jdbcConnection.connection().rollback(((SqlServerSnapshotContext) snapshotContext).preSchemaSnapshotSavepoint);
             LOGGER.info("Schema locks released.");
         }
     }
@@ -143,11 +146,10 @@ public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnap
     @Override
     protected void determineSnapshotOffset(SnapshotContext ctx) throws Exception {
         ctx.offset = new SqlServerOffsetContext(
-                connectorConfig.getLogicalName(),
+                connectorConfig,
                 TxLogPosition.valueOf(jdbcConnection.getMaxLsn()),
                 false,
-                false
-        );
+                false);
     }
 
     @Override
@@ -171,8 +173,7 @@ public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnap
                     schema,
                     connectorConfig.getTableFilters().dataCollectionFilter(),
                     null,
-                    false
-            );
+                    false);
         }
     }
 
@@ -185,22 +186,24 @@ public class SqlServerSnapshotChangeEventSource extends HistorizedRelationalSnap
     @Override
     protected void complete(SnapshotContext snapshotContext) {
         try {
-            jdbcConnection.connection().setTransactionIsolation(((SqlServerSnapshotContext)snapshotContext).isolationLevelBeforeStart);
+            jdbcConnection.connection().setTransactionIsolation(((SqlServerSnapshotContext) snapshotContext).isolationLevelBeforeStart);
+            LOGGER.info("Removing locking timeout");
+            jdbcConnection.execute("SET LOCK_TIMEOUT -1");
         }
         catch (SQLException e) {
             throw new RuntimeException("Failed to set transaction isolation level.", e);
         }
     }
 
+    /**
+     * Generate a valid sqlserver query string for the specified table
+     *
+     * @param tableId the table to generate a query for
+     * @return a valid query string
+     */
     @Override
-    protected String getSnapshotSelect(SnapshotContext snapshotContext, TableId tableId) {
-        return String.format("SELECT * FROM [%s].[%s]", tableId.schema(), tableId.table());
-    }
-
-    @Override
-    protected ChangeRecordEmitter getChangeRecordEmitter(SnapshotContext snapshotContext, Object[] row) {
-        ((SqlServerOffsetContext) snapshotContext.offset).setSourceTime(Instant.ofEpochMilli(getClock().currentTimeInMillis()));
-        return new SnapshotChangeRecordEmitter(snapshotContext.offset, row, getClock());
+    protected Optional<String> getSnapshotSelect(SnapshotContext snapshotContext, TableId tableId) {
+        return Optional.of(String.format("SELECT * FROM [%s].[%s]", tableId.schema(), tableId.table()));
     }
 
     /**

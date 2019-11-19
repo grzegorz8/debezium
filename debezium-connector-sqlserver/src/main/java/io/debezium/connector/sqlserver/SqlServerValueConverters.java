@@ -19,6 +19,7 @@ import io.debezium.jdbc.TemporalPrecisionMode;
 import io.debezium.relational.Column;
 import io.debezium.relational.ValueConverter;
 import io.debezium.time.ZonedTimestamp;
+
 import microsoft.sql.DateTimeOffset;
 
 /**
@@ -43,9 +44,11 @@ public class SqlServerValueConverters extends JdbcValueConverters {
      *            treated; may be null if
      *            {@link io.debezium.jdbc.JdbcValueConverters.DecimalMode#PRECISE}
      *            is to be used
+     * @param temporalPrecisionMode
+     *            date/time value will be represented either as Connect datatypes or Debezium specific datatypes
      */
-    public SqlServerValueConverters(DecimalMode decimalMode) {
-        super(decimalMode, TemporalPrecisionMode.ADAPTIVE_TIME_MICROSECONDS, ZoneOffset.UTC, null, null);
+    public SqlServerValueConverters(DecimalMode decimalMode, TemporalPrecisionMode temporalPrecisionMode) {
+        super(decimalMode, temporalPrecisionMode, ZoneOffset.UTC, null, null);
     }
 
     @Override
@@ -82,7 +85,7 @@ public class SqlServerValueConverters extends JdbcValueConverters {
             case microsoft.sql.Types.DATETIMEOFFSET:
                 return (data) -> convertTimestampWithZone(column, fieldDefn, data);
 
-                // TODO Geometry and geography supported since 6.5.0
+            // TODO Geometry and geography supported since 6.5.0
             default:
                 return super.converter(column, fieldDefn);
         }
@@ -100,7 +103,7 @@ public class SqlServerValueConverters extends JdbcValueConverters {
         if (!(data instanceof DateTimeOffset)) {
             return super.convertTimestampWithZone(column, fieldDefn, data);
         }
-        final DateTimeOffset dto = (DateTimeOffset)data;
+        final DateTimeOffset dto = (DateTimeOffset) data;
 
         // Timestamp is provided in UTC time
         final Timestamp utc = dto.getTimestamp();

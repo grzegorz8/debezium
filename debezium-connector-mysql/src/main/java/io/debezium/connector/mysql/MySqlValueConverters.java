@@ -15,13 +15,17 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoField;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.Temporal;
+import java.time.temporal.TemporalAdjuster;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.data.Field;
@@ -29,6 +33,8 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.github.shyiko.mysql.binlog.event.deserialization.AbstractRowsEventDataDeserializer;
 import com.github.shyiko.mysql.binlog.event.deserialization.json.JsonBinary;
@@ -40,6 +46,7 @@ import io.debezium.data.Json;
 import io.debezium.jdbc.JdbcValueConverters;
 import io.debezium.jdbc.TemporalPrecisionMode;
 import io.debezium.relational.Column;
+import io.debezium.relational.Table;
 import io.debezium.relational.ValueConverter;
 import io.debezium.time.Year;
 import io.debezium.util.Strings;
@@ -61,6 +68,23 @@ import io.debezium.util.Strings;
 @Immutable
 public class MySqlValueConverters extends JdbcValueConverters {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(MySqlValueConverters.class);
+
+    /**
+     * Used to parse values of TIME columns. Format: 000:00:00.000000.
+     */
+    private static final Pattern TIME_FIELD_PATTERN = Pattern.compile("(\\-?[0-9]*):([0-9]*):([0-9]*)(\\.([0-9]*))?");
+
+    /**
+     * Used to parse values of DATE columns. Format: 000-00-00.
+     */
+    private static final Pattern DATE_FIELD_PATTERN = Pattern.compile("([0-9]*)-([0-9]*)-([0-9]*)");
+
+    /**
+     * Used to parse values of TIMESTAMP columns. Format: 000-00-00 00:00:00.000.
+     */
+    private static final Pattern TIMESTAMP_FIELD_PATTERN = Pattern.compile("([0-9]*)-([0-9]*)-([0-9]*) .*");
+
     /**
      * A utility method that adjusts <a href="https://dev.mysql.com/doc/refman/5.7/en/two-digit-years.html">ambiguous</a> 2-digit
      * year values of DATETIME, DATE, and TIMESTAMP types using these MySQL-specific rules:
@@ -77,34 +101,12 @@ public class MySqlValueConverters extends JdbcValueConverters {
             int year = temporal.get(ChronoField.YEAR);
             if (0 <= year && year <= 69) {
                 temporal = temporal.plus(2000, ChronoUnit.YEARS);
-            } else if (70 <= year && year <= 99) {
+            }
+            else if (70 <= year && year <= 99) {
                 temporal = temporal.plus(1900, ChronoUnit.YEARS);
             }
         }
         return temporal;
-    }
-
-    /**
-     * A utility method that adjusts <a href="https://dev.mysql.com/doc/refman/5.7/en/two-digit-years.html">ambiguous</a> 2-digit
-     * year values of YEAR type using these MySQL-specific rules:
-     * <ul>
-     * <li>Year values in the range 01-69 are converted to 2001-2069.</li>
-     * <li>Year values in the range 70-99 are converted to 1970-1999.</li>
-     * </ul>
-     * MySQL treats YEAR(4) the same, except that a numeric 00 inserted into YEAR(4) results in 0000 rather than 2000; to
-     * specify zero for YEAR(4) and have it be interpreted as 2000, specify it as a string '0' or '00'. This should be handled
-     * by MySQL before Debezium sees the value.
-     *
-     * @param year the year value to adjust; may not be null
-     * @return the possibly adjusted year number; never null
-     */
-    protected static int adjustYear(int year) {
-        if (0 < year && year <= 69) {
-            year += 2000;
-        } else if (70 <= year && year <= 99) {
-            year += 1900;
-        }
-        return year;
     }
 
     /**
@@ -119,7 +121,7 @@ public class MySqlValueConverters extends JdbcValueConverters {
      *            {@link io.debezium.jdbc.JdbcValueConverters.BigIntUnsignedMode#PRECISE} is to be used
      */
     public MySqlValueConverters(DecimalMode decimalMode, TemporalPrecisionMode temporalPrecisionMode, BigIntUnsignedMode bigIntUnsignedMode) {
-        this(decimalMode, temporalPrecisionMode, ZoneOffset.UTC, bigIntUnsignedMode);
+        this(decimalMode, temporalPrecisionMode, ZoneOffset.UTC, bigIntUnsignedMode, x -> x);
     }
 
     /**
@@ -134,9 +136,27 @@ public class MySqlValueConverters extends JdbcValueConverters {
      *            have timezones; may be null if UTC is to be used
      * @param bigIntUnsignedMode how {@code BIGINT UNSIGNED} values should be treated; may be null if
      *            {@link io.debezium.jdbc.JdbcValueConverters.BigIntUnsignedMode#PRECISE} is to be used
+     * @param adjuster a temporal adjuster to make a database specific time modification before conversion
      */
-    public MySqlValueConverters(DecimalMode decimalMode, TemporalPrecisionMode temporalPrecisionMode, ZoneOffset defaultOffset, BigIntUnsignedMode bigIntUnsignedMode) {
-        super(decimalMode, temporalPrecisionMode, defaultOffset, MySqlValueConverters::adjustTemporal, bigIntUnsignedMode);
+    public MySqlValueConverters(DecimalMode decimalMode, TemporalPrecisionMode temporalPrecisionMode, ZoneOffset defaultOffset, BigIntUnsignedMode bigIntUnsignedMode,
+                                TemporalAdjuster adjuster) {
+        super(decimalMode, temporalPrecisionMode, defaultOffset, adjuster, bigIntUnsignedMode);
+    }
+
+    /**
+     * Create a new instance that always uses UTC for the default time zone when converting values without timezone information
+     * to values that require timezones.
+     * <p>
+     *
+     * @param decimalMode how {@code DECIMAL} and {@code NUMERIC} values should be treated; may be null if
+     *            {@link io.debezium.jdbc.JdbcValueConverters.DecimalMode#PRECISE} is to be used
+     * @param temporalPrecisionMode temporal precision mode based on {@link io.debezium.jdbc.TemporalPrecisionMode}
+     * @param bigIntUnsignedMode how {@code BIGINT UNSIGNED} values should be treated; may be null if
+     *            {@link io.debezium.jdbc.JdbcValueConverters.BigIntUnsignedMode#PRECISE} is to be used
+     * @param adjuster a temporal adjuster to make a database specific time modification before conversion
+     */
+    public MySqlValueConverters(DecimalMode decimalMode, TemporalPrecisionMode temporalPrecisionMode, BigIntUnsignedMode bigIntUnsignedMode, TemporalAdjuster adjuster) {
+        this(decimalMode, temporalPrecisionMode, ZoneOffset.UTC, bigIntUnsignedMode, adjuster);
     }
 
     @Override
@@ -214,7 +234,7 @@ public class MySqlValueConverters extends JdbcValueConverters {
                 || isGeometryCollection(typeName)) {
             return (data -> convertGeometry(column, fieldDefn, data));
         }
-        if (matches(typeName, "POINT")){
+        if (matches(typeName, "POINT")) {
             // backwards compatibility
             return (data -> convertPoint(column, fieldDefn, data));
         }
@@ -277,10 +297,11 @@ public class MySqlValueConverters extends JdbcValueConverters {
                 logger.warn("Using UTF-8 charset by default for column without charset: {}", column);
                 return (data) -> convertString(column, fieldDefn, StandardCharsets.UTF_8, data);
             case Types.TIME:
-                if (adaptiveTimeMicrosecondsPrecisionMode)
+                if (adaptiveTimeMicrosecondsPrecisionMode) {
                     return data -> convertDurationToMicroseconds(column, fieldDefn, data);
+                }
             case Types.TIMESTAMP:
-                return ((ValueConverter)(data-> convertTimestampToLocalDateTime(column, fieldDefn, data))).and(super.converter(column, fieldDefn));
+                return ((ValueConverter) (data -> convertTimestampToLocalDateTime(column, fieldDefn, data))).and(super.converter(column, fieldDefn));
             default:
                 break;
         }
@@ -304,10 +325,12 @@ public class MySqlValueConverters extends JdbcValueConverters {
         String encoding = CharsetMapping.getJavaEncodingForMysqlCharset(mySqlCharsetName);
         if (encoding == null) {
             logger.warn("Column uses MySQL character set '{}', which has no mapping to a Java character set", mySqlCharsetName);
-        } else {
+        }
+        else {
             try {
                 return Charset.forName(encoding);
-            } catch (IllegalCharsetNameException e) {
+            }
+            catch (IllegalCharsetNameException e) {
                 logger.error("Unable to load Java charset '{}' for column with MySQL character set '{}'", encoding, mySqlCharsetName);
             }
         }
@@ -335,7 +358,8 @@ public class MySqlValueConverters extends JdbcValueConverters {
                 else {
                     try {
                         r.deliver(JsonBinary.parseAsString((byte[]) data));
-                    } catch (IOException e) {
+                    }
+                    catch (IOException e) {
                         throw new ConnectException("Failed to parse and read a JSON value on " + column + ": " + e.getMessage(), e);
                     }
                 }
@@ -385,18 +409,19 @@ public class MySqlValueConverters extends JdbcValueConverters {
             Object mutData = data;
             if (data instanceof java.time.Year) {
                 // The MySQL binlog always returns a Year object ...
-                r.deliver(adjustYear(((java.time.Year) data).getValue()));
+                r.deliver(adjustTemporal(java.time.Year.of(((java.time.Year) data).getValue())).get(ChronoField.YEAR));
             }
             else if (data instanceof java.sql.Date) {
                 // MySQL JDBC driver sometimes returns a Java SQL Date object ...
-                r.deliver(adjustYear(((java.sql.Date) data).getYear()));
+                // year from java.sql.Date is defined as number of years since 1900
+                r.deliver(((java.sql.Date) data).getYear() + 1900);
             }
             else if (data instanceof String) {
                 mutData = Integer.valueOf((String) data);
             }
             if (mutData instanceof Number) {
                 // MySQL JDBC driver sometimes returns a short ...
-                r.deliver(adjustYear(((Number) mutData).intValue()));
+                r.deliver(adjustTemporal(java.time.Year.of(((Number) mutData).intValue())).get(ChronoField.YEAR));
             }
         });
     }
@@ -474,7 +499,9 @@ public class MySqlValueConverters extends JdbcValueConverters {
      * @return {@code true} if the type matches the specified type, or {@code false} otherwise
      */
     protected boolean matches(String upperCaseTypeName, String upperCaseMatch) {
-        if (upperCaseTypeName == null) return false;
+        if (upperCaseTypeName == null) {
+            return false;
+        }
         return upperCaseMatch.equals(upperCaseTypeName) || upperCaseTypeName.startsWith(upperCaseMatch + "(");
     }
 
@@ -494,8 +521,7 @@ public class MySqlValueConverters extends JdbcValueConverters {
     }
 
     protected List<String> extractEnumAndSetOptions(Column column) {
-//        return MySqlDdlParser.parseSetAndEnumOptions(column.typeExpression());
-        return MySqlAntlrDdlParser.parseSetAndEnumOptions(column.typeExpression());
+        return MySqlAntlrDdlParser.extractEnumAndSetOptions(column.enumValues());
     }
 
     protected String extractEnumAndSetOptionsAsString(Column column) {
@@ -511,12 +537,14 @@ public class MySqlValueConverters extends JdbcValueConverters {
             if (indexes % 2L != 0) {
                 if (first) {
                     first = false;
-                } else {
+                }
+                else {
                     sb.append(',');
                 }
                 if (index < optionLen) {
                     sb.append(options.get(index));
-                } else {
+                }
+                else {
                     logger.warn("Found unexpected index '{}' on column {}", index, column);
                 }
             }
@@ -536,7 +564,7 @@ public class MySqlValueConverters extends JdbcValueConverters {
      * @return the converted value, or null if the conversion could not be made and the column allows nulls
      * @throws IllegalArgumentException if the value could not be converted but the column does not allow nulls
      */
-    protected Object convertPoint(Column column, Field fieldDefn, Object data){
+    protected Object convertPoint(Column column, Field fieldDefn, Object data) {
         final MySqlGeometry empty = MySqlGeometry.createEmpty();
         return convertValue(column, fieldDefn, data, io.debezium.data.geometry.Geometry.createValue(fieldDefn.schema(), empty.getWkb(), empty.getSrid()), (r) -> {
             if (data instanceof byte[]) {
@@ -545,7 +573,8 @@ public class MySqlValueConverters extends JdbcValueConverters {
                 MySqlGeometry mySqlGeometry = MySqlGeometry.fromBytes((byte[]) data);
                 if (mySqlGeometry.isPoint()) {
                     r.deliver(io.debezium.data.geometry.Point.createValue(fieldDefn.schema(), mySqlGeometry.getWkb(), mySqlGeometry.getSrid()));
-                } else {
+                }
+                else {
                     throw new ConnectException("Failed to parse and read a value of type POINT on " + column);
                 }
             }
@@ -598,16 +627,16 @@ public class MySqlValueConverters extends JdbcValueConverters {
      *
      * @throws IllegalArgumentException if the value could not be converted but the column does not allow nulls
      */
-    protected Object convertUnsignedTinyint(Column column, Field fieldDefn, Object data){
-        return convertValue(column, fieldDefn, data, (short)0, (r) -> {
+    protected Object convertUnsignedTinyint(Column column, Field fieldDefn, Object data) {
+        return convertValue(column, fieldDefn, data, (short) 0, (r) -> {
             if (data instanceof Short) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedTinyint((short)data));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedTinyint((short) data));
             }
             else if (data instanceof Number) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedTinyint(((Number)data).shortValue()));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedTinyint(((Number) data).shortValue()));
             }
             else {
-                //We continue with the original converting method (smallint) since we have an unsigned Tinyint
+                // We continue with the original converting method (smallint) since we have an unsigned Tinyint
                 r.deliver(convertSmallInt(column, fieldDefn, data));
             }
         });
@@ -624,16 +653,16 @@ public class MySqlValueConverters extends JdbcValueConverters {
      *
      * @throws IllegalArgumentException if the value could not be converted but the column does not allow nulls
      */
-    protected Object convertUnsignedSmallint(Column column, Field fieldDefn, Object data){
+    protected Object convertUnsignedSmallint(Column column, Field fieldDefn, Object data) {
         return convertValue(column, fieldDefn, data, 0, (r) -> {
             if (data instanceof Integer) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedSmallint((int)data));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedSmallint((int) data));
             }
             else if (data instanceof Number) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedSmallint(((Number)data).intValue()));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedSmallint(((Number) data).intValue()));
             }
             else {
-                //We continue with the original converting method (integer) since we have an unsigned Smallint
+                // We continue with the original converting method (integer) since we have an unsigned Smallint
                 r.deliver(convertInteger(column, fieldDefn, data));
             }
         });
@@ -650,16 +679,16 @@ public class MySqlValueConverters extends JdbcValueConverters {
      *
      * @throws IllegalArgumentException if the value could not be converted but the column does not allow nulls
      */
-    protected Object convertUnsignedMediumint(Column column, Field fieldDefn, Object data){
+    protected Object convertUnsignedMediumint(Column column, Field fieldDefn, Object data) {
         return convertValue(column, fieldDefn, data, 0, (r) -> {
             if (data instanceof Integer) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedMediumint((int)data));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedMediumint((int) data));
             }
             else if (data instanceof Number) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedMediumint(((Number)data).intValue()));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedMediumint(((Number) data).intValue()));
             }
             else {
-                //We continue with the original converting method (integer) since we have an unsigned Medium
+                // We continue with the original converting method (integer) since we have an unsigned Medium
                 r.deliver(convertInteger(column, fieldDefn, data));
             }
         });
@@ -676,16 +705,16 @@ public class MySqlValueConverters extends JdbcValueConverters {
      *
      * @throws IllegalArgumentException if the value could not be converted but the column does not allow nulls
      */
-    protected Object convertUnsignedInt(Column column, Field fieldDefn, Object data){
+    protected Object convertUnsignedInt(Column column, Field fieldDefn, Object data) {
         return convertValue(column, fieldDefn, data, 0L, (r) -> {
             if (data instanceof Long) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedInteger((long)data));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedInteger((long) data));
             }
             else if (data instanceof Number) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedInteger(((Number)data).longValue()));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedInteger(((Number) data).longValue()));
             }
             else {
-                //We continue with the original converting method (bigint) since we have an unsigned Integer
+                // We continue with the original converting method (bigint) since we have an unsigned Integer
                 r.deliver(convertBigInt(column, fieldDefn, data));
             }
         });
@@ -702,16 +731,16 @@ public class MySqlValueConverters extends JdbcValueConverters {
      *
      * @throws IllegalArgumentException if the value could not be converted but the column does not allow nulls
      */
-    protected Object convertUnsignedBigint(Column column, Field fieldDefn, Object data){
+    protected Object convertUnsignedBigint(Column column, Field fieldDefn, Object data) {
         return convertValue(column, fieldDefn, data, 0L, (r) -> {
             if (data instanceof BigDecimal) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedBigint((BigDecimal)data));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedBigint((BigDecimal) data));
             }
             else if (data instanceof Number) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedBigint(new BigDecimal(((Number)data).toString())));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedBigint(new BigDecimal(((Number) data).toString())));
             }
             else if (data instanceof String) {
-                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedBigint(new BigDecimal((String)data)));
+                r.deliver(MySqlUnsignedIntegerConverter.convertUnsignedBigint(new BigDecimal((String) data)));
             }
             else {
                 r.deliver(convertNumeric(column, fieldDefn, data));
@@ -738,9 +767,10 @@ public class MySqlValueConverters extends JdbcValueConverters {
         return convertValue(column, fieldDefn, data, 0L, (r) -> {
             try {
                 if (data instanceof Duration) {
-                    r.deliver(((Duration)data).toNanos() / 1_000);
+                    r.deliver(((Duration) data).toNanos() / 1_000);
                 }
-            } catch (IllegalArgumentException e) {
+            }
+            catch (IllegalArgumentException e) {
             }
         });
     }
@@ -753,6 +783,69 @@ public class MySqlValueConverters extends JdbcValueConverters {
             return data;
         }
 
-        return ((Timestamp)data).toLocalDateTime();
+        return ((Timestamp) data).toLocalDateTime();
+    }
+
+    public static Duration stringToDuration(String timeString) {
+        Matcher matcher = TIME_FIELD_PATTERN.matcher(timeString);
+        if (!matcher.matches()) {
+            throw new RuntimeException("Unexpected format for TIME column: " + timeString);
+        }
+
+        long hours = Long.parseLong(matcher.group(1));
+        long minutes = Long.parseLong(matcher.group(2));
+        long seconds = Long.parseLong(matcher.group(3));
+        long nanoSeconds = 0;
+        String microSecondsString = matcher.group(5);
+        if (microSecondsString != null) {
+            nanoSeconds = Long.parseLong(Strings.justifyLeft(microSecondsString, 9, '0'));
+        }
+
+        if (hours >= 0) {
+            return Duration.ofHours(hours)
+                    .plusMinutes(minutes)
+                    .plusSeconds(seconds)
+                    .plusNanos(nanoSeconds);
+        }
+        else {
+            return Duration.ofHours(hours)
+                    .minusMinutes(minutes)
+                    .minusSeconds(seconds)
+                    .minusNanos(nanoSeconds);
+        }
+    }
+
+    public static LocalDate stringToLocalDate(String dateString, Column column, Table table) {
+        final Matcher matcher = DATE_FIELD_PATTERN.matcher(dateString);
+        if (!matcher.matches()) {
+            throw new RuntimeException("Unexpected format for DATE column: " + dateString);
+        }
+
+        final int year = Integer.parseInt(matcher.group(1));
+        final int month = Integer.parseInt(matcher.group(2));
+        final int day = Integer.parseInt(matcher.group(3));
+
+        if (year == 0 || month == 0 || day == 0) {
+            LOGGER.warn("Invalid value '{}' stored in column '{}' of table '{}' converted to empty value", dateString, column.name(), table.id());
+            return null;
+        }
+        return LocalDate.of(year, month, day);
+    }
+
+    public static boolean containsZeroValuesInDatePart(String timestampString, Column column, Table table) {
+        final Matcher matcher = TIMESTAMP_FIELD_PATTERN.matcher(timestampString);
+        if (!matcher.matches()) {
+            throw new RuntimeException("Unexpected format for DATE column: " + timestampString);
+        }
+
+        final int year = Integer.parseInt(matcher.group(1));
+        final int month = Integer.parseInt(matcher.group(2));
+        final int day = Integer.parseInt(matcher.group(3));
+
+        if (year == 0 || month == 0 || day == 0) {
+            LOGGER.warn("Invalid value '{}' stored in column '{}' of table '{}' converted to empty value", timestampString, column.name(), table.id());
+            return true;
+        }
+        return false;
     }
 }

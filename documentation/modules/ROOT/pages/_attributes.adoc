@@ -1,0 +1,13 @@
+:moduledir: ..
+:attachmentsdir: {moduledir}/assets/attachments
+:examplesdir: {moduledir}/examples
+:imagesdir: {moduledir}/assets/images
+:partialsdir: {moduledir}/pages/_partials
+
+:debezium-version: 1.0.0.Beta2
+:debezium-dev-version: 1.0
+:debezium-kafka-version: 2.3.0
+:debezium-docker-label: 1.0
+:install-version: 1.0
+:confluent-platform-version: 5.1.2
+:strimzi-version: 0.13.0

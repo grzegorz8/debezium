@@ -27,7 +27,19 @@ import io.debezium.function.BlockingConsumer;
  */
 public interface Heartbeat {
 
-    public static final Field HEARTBEAT_INTERVAL = Field.create("heartbeat.interval.ms")
+    public static final String HEARTBEAT_INTERVAL_PROPERTY_NAME = "heartbeat.interval.ms";
+
+    /**
+     * Returns the offset to be used when emitting a heartbeat event. This supplier
+     * interface allows for a lazy creation of the offset only when a heartbeat
+     * actually is sent, in cases where it's determination is costly.
+     */
+    @FunctionalInterface
+    public static interface OffsetProducer {
+        Map<String, ?> offset();
+    }
+
+    public static final Field HEARTBEAT_INTERVAL = Field.create(HEARTBEAT_INTERVAL_PROPERTY_NAME)
             .withDisplayName("Conector heartbeat interval (milli-seconds)")
             .withType(Type.INT)
             .withWidth(Width.MEDIUM)
@@ -40,13 +52,13 @@ public interface Heartbeat {
             .withValidation(Field::isNonNegativeInteger);
 
     public static final Field HEARTBEAT_TOPICS_PREFIX = Field.create("heartbeat.topics.prefix")
-           .withDisplayName("A prefix used for naming of heartbeat topics")
-           .withType(Type.STRING)
-           .withWidth(Width.MEDIUM)
-           .withImportance(Importance.LOW)
-           .withDescription("The prefix that is used to name heartbeat topics."
-                   + "Defaults to " + HeartbeatImpl.DEFAULT_HEARTBEAT_TOPICS_PREFIX + ".")
-           .withDefault(HeartbeatImpl.DEFAULT_HEARTBEAT_TOPICS_PREFIX);
+            .withDisplayName("A prefix used for naming of heartbeat topics")
+            .withType(Type.STRING)
+            .withWidth(Width.MEDIUM)
+            .withImportance(Importance.LOW)
+            .withDescription("The prefix that is used to name heartbeat topics."
+                    + "Defaults to " + HeartbeatImpl.DEFAULT_HEARTBEAT_TOPICS_PREFIX + ".")
+            .withDefault(HeartbeatImpl.DEFAULT_HEARTBEAT_TOPICS_PREFIX);
 
     /**
      * No-op Heartbeat implementation
@@ -60,6 +72,17 @@ public interface Heartbeat {
         @Override
         public void forcedBeat(Map<String, ?> partition, Map<String, ?> offset, BlockingConsumer<SourceRecord> consumer)
                 throws InterruptedException {
+        }
+
+        @Override
+        public void heartbeat(Map<String, ?> partition, OffsetProducer offsetProducer,
+                              BlockingConsumer<SourceRecord> consumer)
+                throws InterruptedException {
+        }
+
+        @Override
+        public boolean isEnabled() {
+            return false;
         }
     };
 
@@ -75,6 +98,15 @@ public interface Heartbeat {
     void heartbeat(Map<String, ?> partition, Map<String, ?> offset, BlockingConsumer<SourceRecord> consumer) throws InterruptedException;
 
     /**
+     * Generates a heartbeat record if defined time has elapsed
+     *
+     * @param partition partition for the heartbeat record
+     * @param offsetProducer lazily calculated offset for the heartbeat record
+     * @param consumer - a code to place record among others to be sent into Connect
+     */
+    void heartbeat(Map<String, ?> partition, OffsetProducer offsetProducer, BlockingConsumer<SourceRecord> consumer) throws InterruptedException;
+
+    /**
      * Generates a heartbeat record unconditionaly
      *
      * @param partition partition for the heartbeat record
@@ -86,6 +118,11 @@ public interface Heartbeat {
     void forcedBeat(Map<String, ?> partition, Map<String, ?> offset, BlockingConsumer<SourceRecord> consumer) throws InterruptedException;
 
     /**
+     * Whether heartbeats are enabled or not.
+     */
+    boolean isEnabled();
+
+    /**
      * Provide an instance of Heartbeat object
      *
      * @param configuration - connector configuration
@@ -93,7 +130,6 @@ public interface Heartbeat {
      * @return
      */
     public static Heartbeat create(Configuration configuration, String topicName, String key) {
-        return configuration.getDuration(HeartbeatImpl.HEARTBEAT_INTERVAL, ChronoUnit.MILLIS).isZero() ?
-            NULL : new HeartbeatImpl(configuration, topicName, key);
+        return configuration.getDuration(HeartbeatImpl.HEARTBEAT_INTERVAL, ChronoUnit.MILLIS).isZero() ? NULL : new HeartbeatImpl(configuration, topicName, key);
     }
 }

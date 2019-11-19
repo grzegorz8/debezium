@@ -25,11 +25,13 @@ import io.debezium.config.Configuration;
 import io.debezium.connector.sqlserver.SqlServerConnection;
 import io.debezium.connector.sqlserver.SqlServerConnectorConfig;
 import io.debezium.jdbc.JdbcConfiguration;
+import io.debezium.relational.RelationalDatabaseConnectorConfig;
 import io.debezium.relational.history.FileDatabaseHistory;
 import io.debezium.util.Clock;
 import io.debezium.util.IoUtil;
 import io.debezium.util.Strings;
 import io.debezium.util.Metronome;
+import io.debezium.util.Strings;
 import io.debezium.util.Testing;
 
 /**
@@ -50,6 +52,7 @@ public class TestHelper {
             + "EXEC sys.sp_cdc_disable_db";
     private static final String ENABLE_TABLE_CDC = "IF EXISTS(select 1 from sys.tables where name = '#' AND is_tracked_by_cdc=0)\n"
             + "EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'#', @role_name = NULL, @supports_net_changes = 0";
+    private static final String IS_CDC_TABLE_ENABLED = "SELECT COUNT(*) FROM sys.tables tb WHERE tb.is_tracked_by_cdc = 1 AND tb.name='#'";
     private static final String ENABLE_TABLE_CDC_WITH_CUSTOM_CAPTURE = "EXEC sys.sp_cdc_enable_table @source_schema = N'dbo', @source_name = N'%s', @capture_instance = N'%s', @role_name = NULL, @supports_net_changes = 0, @captured_column_list = %s";
     private static final String DISABLE_TABLE_CDC = "EXEC sys.sp_cdc_disable_table @source_schema = N'dbo', @source_name = N'#', @capture_instance = 'all'";
     private static final String CDC_WRAPPERS_DML;
@@ -66,22 +69,22 @@ public class TestHelper {
 
     public static JdbcConfiguration adminJdbcConfig() {
         return JdbcConfiguration.copy(Configuration.fromSystemProperties("database."))
-                                .withDefault(JdbcConfiguration.DATABASE, "master")
-                                .withDefault(JdbcConfiguration.HOSTNAME, "localhost")
-                                .withDefault(JdbcConfiguration.PORT, 1433)
-                                .withDefault(JdbcConfiguration.USER, "sa")
-                                .withDefault(JdbcConfiguration.PASSWORD, "Password!")
-                                .build();
+                .withDefault(JdbcConfiguration.DATABASE, "master")
+                .withDefault(JdbcConfiguration.HOSTNAME, "localhost")
+                .withDefault(JdbcConfiguration.PORT, 1433)
+                .withDefault(JdbcConfiguration.USER, "sa")
+                .withDefault(JdbcConfiguration.PASSWORD, "Password!")
+                .build();
     }
 
     public static JdbcConfiguration defaultJdbcConfig() {
         return JdbcConfiguration.copy(Configuration.fromSystemProperties("database."))
-                                .withDefault(JdbcConfiguration.DATABASE, TEST_DATABASE)
-                                .withDefault(JdbcConfiguration.HOSTNAME, "localhost")
-                                .withDefault(JdbcConfiguration.PORT, 1433)
-                                .withDefault(JdbcConfiguration.USER, "sa")
-                                .withDefault(JdbcConfiguration.PASSWORD, "Password!")
-                                .build();
+                .withDefault(JdbcConfiguration.DATABASE, TEST_DATABASE)
+                .withDefault(JdbcConfiguration.HOSTNAME, "localhost")
+                .withDefault(JdbcConfiguration.PORT, 1433)
+                .withDefault(JdbcConfiguration.USER, "sa")
+                .withDefault(JdbcConfiguration.PASSWORD, "Password!")
+                .build();
     }
 
     /**
@@ -93,10 +96,9 @@ public class TestHelper {
         Configuration.Builder builder = Configuration.create();
 
         jdbcConfiguration.forEach(
-                (field, value) -> builder.with(SqlServerConnectorConfig.DATABASE_CONFIG_PREFIX + field, value)
-        );
+                (field, value) -> builder.with(SqlServerConnectorConfig.DATABASE_CONFIG_PREFIX + field, value));
 
-        return builder.with(SqlServerConnectorConfig.LOGICAL_NAME, "server1")
+        return builder.with(RelationalDatabaseConnectorConfig.SERVER_NAME, "server1")
                 .with(SqlServerConnectorConfig.DATABASE_HISTORY, FileDatabaseHistory.class)
                 .with(FileDatabaseHistory.FILE_PATH, DB_HISTORY_PATH);
     }
@@ -192,8 +194,22 @@ public class TestHelper {
     public static void enableTableCdc(SqlServerConnection connection, String name) throws SQLException {
         Objects.requireNonNull(name);
         String enableCdcForTableStmt = ENABLE_TABLE_CDC.replace(STATEMENTS_PLACEHOLDER, name);
-        String generateWrapperFunctionsStmts = CDC_WRAPPERS_DML.replaceAll(STATEMENTS_PLACEHOLDER, name);
+        String generateWrapperFunctionsStmts = CDC_WRAPPERS_DML.replaceAll(STATEMENTS_PLACEHOLDER, name.replaceAll("\\$", "\\\\\\$"));
         connection.execute(enableCdcForTableStmt, generateWrapperFunctionsStmts);
+    }
+
+    /**
+     * @param name
+     *            the name of the table, may not be {@code null}
+     * @return true if CDC is enabled for the table
+     * @throws SQLException if anything unexpected fails
+     */
+    public static boolean isCdcEnabled(SqlServerConnection connection, String name) throws SQLException {
+        Objects.requireNonNull(name);
+        String tableEnabledStmt = IS_CDC_TABLE_ENABLED.replace(STATEMENTS_PLACEHOLDER, name);
+        return connection.queryAndMap(
+                tableEnabledStmt,
+                connection.singleResultMapper(rs -> rs.getInt(1) > 0, "Cannot get CDC status of the table"));
     }
 
     /**
@@ -262,7 +278,8 @@ public class TestHelper {
                 Assert.fail("Snapshot was not completed on time");
             }
             try {
-                final boolean completed = (boolean)mbeanServer.getAttribute(new ObjectName("debezium.sql_server:type=connector-metrics,context=snapshot,server=server1"), "SnapshotCompleted");
+                final boolean completed = (boolean) mbeanServer.getAttribute(new ObjectName("debezium.sql_server:type=connector-metrics,context=snapshot,server=server1"),
+                        "SnapshotCompleted");
                 if (completed) {
                     break;
                 }

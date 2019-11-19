@@ -12,7 +12,10 @@ import java.util.Map;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 
+import io.debezium.connector.SnapshotRecord;
 import io.debezium.pipeline.spi.OffsetContext;
+import io.debezium.relational.TableId;
+import io.debezium.schema.DataCollectionId;
 import io.debezium.util.Collect;
 
 public class SqlServerOffsetContext implements OffsetContext {
@@ -25,9 +28,14 @@ public class SqlServerOffsetContext implements OffsetContext {
     private final Map<String, String> partition;
     private boolean snapshotCompleted;
 
-    public SqlServerOffsetContext(String serverName, TxLogPosition position, boolean snapshot, boolean snapshotCompleted) {
-        partition = Collections.singletonMap(SERVER_PARTITION_KEY, serverName);
-        sourceInfo = new SourceInfo(serverName);
+    /**
+     * The index of the current event within the current transaction.
+     */
+    private long eventSerialNo;
+
+    public SqlServerOffsetContext(SqlServerConnectorConfig connectorConfig, TxLogPosition position, boolean snapshot, boolean snapshotCompleted, long eventSerialNo) {
+        partition = Collections.singletonMap(SERVER_PARTITION_KEY, connectorConfig.getLogicalName());
+        sourceInfo = new SourceInfo(connectorConfig);
 
         sourceInfo.setCommitLsn(position.getCommitLsn());
         sourceInfo.setChangeLsn(position.getInTxLsn());
@@ -38,8 +46,13 @@ public class SqlServerOffsetContext implements OffsetContext {
             postSnapshotCompletion();
         }
         else {
-            sourceInfo.setSnapshot(snapshot);
+            sourceInfo.setSnapshot(snapshot ? SnapshotRecord.TRUE : SnapshotRecord.FALSE);
         }
+        this.eventSerialNo = eventSerialNo;
+    }
+
+    public SqlServerOffsetContext(SqlServerConnectorConfig connectorConfig, TxLogPosition position, boolean snapshot, boolean snapshotCompleted) {
+        this(connectorConfig, position, snapshot, snapshotCompleted, 1);
     }
 
     @Override
@@ -53,15 +66,14 @@ public class SqlServerOffsetContext implements OffsetContext {
             return Collect.hashMapOf(
                     SourceInfo.SNAPSHOT_KEY, true,
                     SNAPSHOT_COMPLETED_KEY, snapshotCompleted,
-                    SourceInfo.COMMIT_LSN_KEY, sourceInfo.getCommitLsn().toString()
-            );
+                    SourceInfo.COMMIT_LSN_KEY, sourceInfo.getCommitLsn().toString());
         }
         else {
             return Collect.hashMapOf(
                     SourceInfo.COMMIT_LSN_KEY, sourceInfo.getCommitLsn().toString(),
                     SourceInfo.CHANGE_LSN_KEY,
-                        sourceInfo.getChangeLsn() == null ? null : sourceInfo.getChangeLsn().toString()
-            );
+                    sourceInfo.getChangeLsn() == null ? null : sourceInfo.getChangeLsn().toString(),
+                    SourceInfo.EVENT_SERIAL_NO_KEY, eventSerialNo);
         }
     }
 
@@ -79,13 +91,20 @@ public class SqlServerOffsetContext implements OffsetContext {
         return TxLogPosition.valueOf(sourceInfo.getCommitLsn(), sourceInfo.getChangeLsn());
     }
 
-    public void setChangePosition(TxLogPosition position) {
-        sourceInfo.setCommitLsn(position.getCommitLsn());
-        sourceInfo.setChangeLsn(position.getInTxLsn());
+    public long getEventSerialNo() {
+        return eventSerialNo;
     }
 
-    public void setSourceTime(Instant instant) {
-        sourceInfo.setSourceTime(instant);
+    public void setChangePosition(TxLogPosition position, int eventCount) {
+        if (getChangePosition().equals(position)) {
+            eventSerialNo += eventCount;
+        }
+        else {
+            eventSerialNo = eventCount;
+        }
+        sourceInfo.setCommitLsn(position.getCommitLsn());
+        sourceInfo.setChangeLsn(position.getInTxLsn());
+        sourceInfo.setEventSerialNo(eventSerialNo);
     }
 
     @Override
@@ -93,9 +112,13 @@ public class SqlServerOffsetContext implements OffsetContext {
         return sourceInfo.isSnapshot() && !snapshotCompleted;
     }
 
+    public boolean isSnapshotCompleted() {
+        return snapshotCompleted;
+    }
+
     @Override
     public void preSnapshotStart() {
-        sourceInfo.setSnapshot(true);
+        sourceInfo.setSnapshot(SnapshotRecord.TRUE);
         snapshotCompleted = false;
     }
 
@@ -106,30 +129,36 @@ public class SqlServerOffsetContext implements OffsetContext {
 
     @Override
     public void postSnapshotCompletion() {
-        sourceInfo.setSnapshot(false);
+        sourceInfo.setSnapshot(SnapshotRecord.FALSE);
     }
 
     public static class Loader implements OffsetContext.Loader {
 
-        private final String logicalName;
+        private final SqlServerConnectorConfig connectorConfig;
 
-        public Loader(String logicalName) {
-            this.logicalName = logicalName;
+        public Loader(SqlServerConnectorConfig connectorConfig) {
+            this.connectorConfig = connectorConfig;
         }
 
         @Override
         public Map<String, ?> getPartition() {
-            return Collections.singletonMap(SERVER_PARTITION_KEY, logicalName);
+            return Collections.singletonMap(SERVER_PARTITION_KEY, connectorConfig.getLogicalName());
         }
 
         @Override
         public OffsetContext load(Map<String, ?> offset) {
-            final Lsn changeLsn = Lsn.valueOf((String)offset.get(SourceInfo.CHANGE_LSN_KEY));
-            final Lsn commitLsn = Lsn.valueOf((String)offset.get(SourceInfo.COMMIT_LSN_KEY));
+            final Lsn changeLsn = Lsn.valueOf((String) offset.get(SourceInfo.CHANGE_LSN_KEY));
+            final Lsn commitLsn = Lsn.valueOf((String) offset.get(SourceInfo.COMMIT_LSN_KEY));
             boolean snapshot = Boolean.TRUE.equals(offset.get(SourceInfo.SNAPSHOT_KEY));
             boolean snapshotCompleted = Boolean.TRUE.equals(offset.get(SNAPSHOT_COMPLETED_KEY));
 
-            return new SqlServerOffsetContext(logicalName, TxLogPosition.valueOf(commitLsn, changeLsn), snapshot, snapshotCompleted);
+            // only introduced in 0.10.Beta1, so it might be not present when upgrading from earlier versions
+            Long eventSerialNo = ((Long) offset.get(SourceInfo.EVENT_SERIAL_NO_KEY));
+            if (eventSerialNo == null) {
+                eventSerialNo = Long.valueOf(0);
+            }
+
+            return new SqlServerOffsetContext(connectorConfig, TxLogPosition.valueOf(commitLsn, changeLsn), snapshot, snapshotCompleted, eventSerialNo);
         }
     }
 
@@ -140,6 +169,18 @@ public class SqlServerOffsetContext implements OffsetContext {
                 ", sourceInfo=" + sourceInfo +
                 ", partition=" + partition +
                 ", snapshotCompleted=" + snapshotCompleted +
+                ", eventSerialNo=" + eventSerialNo +
                 "]";
+    }
+
+    @Override
+    public void markLastSnapshotRecord() {
+        sourceInfo.setSnapshot(SnapshotRecord.LAST);
+    }
+
+    @Override
+    public void event(DataCollectionId tableId, Instant timestamp) {
+        sourceInfo.setSourceTime(timestamp);
+        sourceInfo.setTableId((TableId) tableId);
     }
 }

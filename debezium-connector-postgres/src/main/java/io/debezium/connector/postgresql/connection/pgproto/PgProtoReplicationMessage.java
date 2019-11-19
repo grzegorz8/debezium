@@ -9,26 +9,30 @@ package io.debezium.connector.postgresql.connection.pgproto;
 import java.math.BigDecimal;
 import java.nio.charset.Charset;
 import java.sql.SQLException;
-import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.apache.kafka.connect.data.Field;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.postgresql.geometric.PGpoint;
 import org.postgresql.jdbc.PgArray;
+import org.postgresql.util.PGInterval;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.debezium.connector.postgresql.PgOid;
+import io.debezium.connector.postgresql.PostgresStreamingChangeEventSource.PgConnectionSupplier;
 import io.debezium.connector.postgresql.PostgresType;
 import io.debezium.connector.postgresql.PostgresValueConverter;
-import io.debezium.connector.postgresql.RecordsStreamProducer.PgConnectionSupplier;
 import io.debezium.connector.postgresql.TypeRegistry;
+import io.debezium.connector.postgresql.UnchangedToastedReplicationMessageColumn;
 import io.debezium.connector.postgresql.connection.AbstractReplicationMessageColumn;
 import io.debezium.connector.postgresql.connection.ReplicationMessage;
 import io.debezium.connector.postgresql.proto.PgProto;
@@ -56,20 +60,21 @@ class PgProtoReplicationMessage implements ReplicationMessage {
     @Override
     public Operation getOperation() {
         switch (rawMessage.getOp()) {
-        case INSERT:
-            return Operation.INSERT;
-        case UPDATE:
-            return Operation.UPDATE;
-        case DELETE:
-            return Operation.DELETE;
+            case INSERT:
+                return Operation.INSERT;
+            case UPDATE:
+                return Operation.UPDATE;
+            case DELETE:
+                return Operation.DELETE;
         }
         throw new IllegalArgumentException(
                 "Unknown operation '" + rawMessage.getOp() + "' in replication stream message");
     }
 
     @Override
-    public long getCommitTime() {
-        return rawMessage.getCommitTime();
+    public Instant getCommitTime() {
+        // value is microseconds
+        return Instant.ofEpochSecond(0, rawMessage.getCommitTime() * 1_000);
     }
 
     @Override
@@ -103,8 +108,13 @@ class PgProtoReplicationMessage implements ReplicationMessage {
                     final PgProto.DatumMessage datum = messageList.get(index);
                     final Optional<PgProto.TypeInfo> typeInfo = Optional.ofNullable(hasTypeMetadata() && typeInfoList != null ? typeInfoList.get(index) : null);
                     final String columnName = Strings.unquoteIdentifierPart(datum.getColumnName());
-                    final PostgresType type = typeRegistry.get((int)datum.getColumnType());
-                    return new AbstractReplicationMessageColumn(columnName, type, typeInfo.map(PgProto.TypeInfo::getModifier).orElse(null), typeInfo.map(PgProto.TypeInfo::getValueOptional).orElse(Boolean.FALSE), hasTypeMetadata()) {
+                    final PostgresType type = typeRegistry.get((int) datum.getColumnType());
+                    if (datum.hasDatumMissing()) {
+                        return new UnchangedToastedReplicationMessageColumn(columnName, type, typeInfo.map(PgProto.TypeInfo::getModifier).orElse(null),
+                                typeInfo.map(PgProto.TypeInfo::getValueOptional).orElse(Boolean.FALSE), hasTypeMetadata());
+                    }
+                    return new AbstractReplicationMessageColumn(columnName, type, typeInfo.map(PgProto.TypeInfo::getModifier).orElse(null),
+                            typeInfo.map(PgProto.TypeInfo::getValueOptional).orElse(Boolean.FALSE), hasTypeMetadata()) {
 
                         @Override
                         public Object getValue(PgConnectionSupplier connection, boolean includeUnknownDatatypes) {
@@ -116,10 +126,9 @@ class PgProtoReplicationMessage implements ReplicationMessage {
                             return datum.toString();
                         }
                     };
-                   })
+                })
                 .collect(Collectors.toList());
     }
-
 
     @Override
     public boolean isLastEventForLsn() {
@@ -138,6 +147,10 @@ class PgProtoReplicationMessage implements ReplicationMessage {
      * @return the value; may be null
      */
     public Object getValue(PgProto.DatumMessage datumMessage, PgConnectionSupplier connection, boolean includeUnknownDatatypes) {
+        if (datumMessage.hasDatumMissing()) {
+            return UnchangedToastedReplicationMessageColumn.UNCHANGED_TOAST_VALUE;
+        }
+
         int columnType = (int) datumMessage.getColumnType();
         switch (columnType) {
             case PgOid.BOOL:
@@ -150,7 +163,7 @@ class PgProtoReplicationMessage implements ReplicationMessage {
             case PgOid.MONEY:
                 return datumMessage.hasDatumInt64() ? datumMessage.getDatumInt64() : null;
             case PgOid.FLOAT4:
-                return datumMessage.hasDatumFloat()? datumMessage.getDatumFloat() : null;
+                return datumMessage.hasDatumFloat() ? datumMessage.getDatumFloat() : null;
             case PgOid.FLOAT8:
                 return datumMessage.hasDatumDouble() ? datumMessage.getDatumDouble() : null;
             case PgOid.NUMERIC:
@@ -173,6 +186,10 @@ class PgProtoReplicationMessage implements ReplicationMessage {
             case PgOid.UUID:
             case PgOid.BIT:
             case PgOid.VARBIT:
+            case PgOid.INET_OID:
+            case PgOid.CIDR_OID:
+            case PgOid.MACADDR_OID:
+            case PgOid.MACADDR8_OID:
                 return datumMessage.hasDatumString() ? datumMessage.getDatumString() : null;
             case PgOid.DATE:
                 return datumMessage.hasDatumInt32() ? (long) datumMessage.getDatumInt32() : null;
@@ -181,34 +198,50 @@ class PgProtoReplicationMessage implements ReplicationMessage {
                     return null;
                 }
                 // these types are sent by the plugin as LONG - microseconds since Unix Epoch
-                // but we'll convert them to nanos which is the smallest unit
-                final LocalDateTime serverLocal = Conversions.toLocalDateTimeUTC(datumMessage.getDatumInt64());
-                return Conversions.toEpochNanos(serverLocal.toInstant(ZoneOffset.UTC));
+                return Conversions.toInstantFromMicros(datumMessage.getDatumInt64());
             case PgOid.TIMESTAMPTZ:
-            case PgOid.TIME:
                 if (!datumMessage.hasDatumInt64()) {
                     return null;
                 }
                 // these types are sent by the plugin as LONG - microseconds since Unix Epoch
-                // but we'll convert them to nanos which is the smallest unit
-                return TimeUnit.NANOSECONDS.convert(datumMessage.getDatumInt64(), TimeUnit.MICROSECONDS);
+                return Conversions.toInstantFromMicros(datumMessage.getDatumInt64()).atOffset(ZoneOffset.UTC);
+            case PgOid.TIME:
+                if (!datumMessage.hasDatumInt64()) {
+                    return null;
+                }
+
+                // these types are sent by the plugin as LONG - microseconds since Unix Epoch
+                return Duration.of(datumMessage.getDatumInt64(), ChronoUnit.MICROS);
             case PgOid.TIMETZ:
                 if (!datumMessage.hasDatumDouble()) {
                     return null;
                 }
-                // the value is sent as a double microseconds, convert to nano
-                return BigDecimal.valueOf(datumMessage.getDatumDouble() * 1000).longValue();
+                // the value is sent as a double microseconds
+                return Conversions.toInstantFromMicros((long) datumMessage.getDatumDouble())
+                        .atOffset(ZoneOffset.UTC)
+                        .toOffsetTime();
             case PgOid.INTERVAL:
                 // these are sent as doubles by the plugin since their storage is larger than 8 bytes
-                return datumMessage.hasDatumDouble() ? datumMessage.getDatumDouble() : null;
-            // the plugin will send back a TZ formatted string
+                try {
+                    return datumMessage.hasDatumDouble() ? datumMessage.getDatumDouble()
+                            : datumMessage.hasDatumString() ? new PGInterval(datumMessage.getDatumString()) : null;
+                }
+                catch (SQLException e) {
+                    throw new ConnectException("Could not convert interval value");
+                }
+                // the plugin will send back a TZ formatted string
             case PgOid.BYTEA:
                 return datumMessage.hasDatumBytes() ? datumMessage.getDatumBytes().toByteArray() : null;
             case PgOid.POINT: {
                 PgProto.Point datumPoint = datumMessage.getDatumPoint();
                 return new PGpoint(datumPoint.getX(), datumPoint.getY());
             }
+            case PgOid.TSRANGE_OID:
             case PgOid.TSTZRANGE_OID:
+            case PgOid.DATERANGE_OID:
+            case PgOid.INT4RANGE_OID:
+            case PgOid.NUM_RANGE_OID:
+            case PgOid.INT8RANGE_OID:
                 return datumMessage.hasDatumBytes() ? new String(datumMessage.getDatumBytes().toByteArray(), Charset.forName("UTF-8")) : null;
             case PgOid.INT2_ARRAY:
             case PgOid.INT4_ARRAY:
@@ -238,6 +271,16 @@ class PgProtoReplicationMessage implements ReplicationMessage {
             case PgOid.JSONB_ARRAY:
             case PgOid.JSON_ARRAY:
             case PgOid.REF_CURSOR_ARRAY:
+            case PgOid.INET_ARRAY:
+            case PgOid.CIDR_ARRAY:
+            case PgOid.MACADDR_ARRAY:
+            case PgOid.MACADDR8_ARRAY:
+            case PgOid.TSRANGE_ARRAY:
+            case PgOid.TSTZRANGE_ARRAY:
+            case PgOid.DATERANGE_ARRAY:
+            case PgOid.INT4RANGE_ARRAY:
+            case PgOid.NUM_RANGE_ARRAY:
+            case PgOid.INT8RANGE_ARRAY:
                 return getArray(datumMessage, connection, columnType);
 
             case PgOid.UNSPECIFIED:
@@ -245,13 +288,16 @@ class PgProtoReplicationMessage implements ReplicationMessage {
 
             default:
                 PostgresType type = typeRegistry.get(columnType);
-                if (type.getOid() == typeRegistry.geometryOid() || type.getOid() == typeRegistry.geographyOid() || type.getOid() == typeRegistry.citextOid() ) {
+                if (type.getOid() == typeRegistry.geometryOid() || type.getOid() == typeRegistry.geographyOid() || type.getOid() == typeRegistry.citextOid()) {
                     return datumMessage.getDatumBytes().toByteArray();
                 }
-                if(type.getOid() == typeRegistry.hstoreOid()) {
+                if (type.getOid() == typeRegistry.hstoreOid()) {
                     return datumMessage.getDatumBytes().toByteArray();
                 }
-                if (type.getOid() == typeRegistry.geometryArrayOid() || type.getOid() == typeRegistry.geographyArrayOid() || type.getOid() == typeRegistry.citextArrayOid() ) {
+                if (type.getOid() == typeRegistry.geometryArrayOid() ||
+                        type.getOid() == typeRegistry.geographyArrayOid() ||
+                        type.getOid() == typeRegistry.citextArrayOid() ||
+                        type.getOid() == typeRegistry.hstoreArrayOid()) {
                     return getArray(datumMessage, connection, columnType);
                 }
                 // unknown data type is sent by decoder as binary value
@@ -270,16 +316,18 @@ class PgProtoReplicationMessage implements ReplicationMessage {
         // Reasons for it being sub-optimal include:
         // 1. It requires a Postgres JDBC connection to deserialize
         // 2. The byte-array is a serialised string but we make the assumption its UTF-8 encoded (which it will
-        //    be in most cases)
+        // be in most cases)
         // 3. For larger arrays and especially 64-bit integers and the like it is less efficient sending string
-        //    representations over the wire.
+        // representations over the wire.
         try {
-            byte[] data = datumMessage.hasDatumBytes()? datumMessage.getDatumBytes().toByteArray() : null;
-            if (data == null) return null;
+            byte[] data = datumMessage.hasDatumBytes() ? datumMessage.getDatumBytes().toByteArray() : null;
+            if (data == null) {
+                return null;
+            }
             String dataString = new String(data, Charset.forName("UTF-8"));
             PgArray arrayData = new PgArray(connection.get(), columnType, dataString);
             Object deserializedArray = arrayData.getArray();
-            return Arrays.asList((Object[])deserializedArray);
+            return Arrays.asList((Object[]) deserializedArray);
         }
         catch (SQLException e) {
             LOGGER.warn("Unexpected exception trying to process PgArray column '{}'", datumMessage.getColumnName(), e);

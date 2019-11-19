@@ -29,9 +29,11 @@ import org.postgresql.util.PSQLState;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.debezium.annotation.VisibleForTesting;
 import io.debezium.config.Configuration;
 import io.debezium.connector.postgresql.PostgresType;
 import io.debezium.connector.postgresql.TypeRegistry;
+import io.debezium.connector.postgresql.spi.SlotState;
 import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.jdbc.JdbcConnection;
 import io.debezium.relational.TableId;
@@ -51,8 +53,8 @@ public class PostgresConnection extends JdbcConnection {
     private static final String URL_PATTERN = "jdbc:postgresql://${" + JdbcConfiguration.HOSTNAME + "}:${"
             + JdbcConfiguration.PORT + "}/${" + JdbcConfiguration.DATABASE + "}";
     protected static final ConnectionFactory FACTORY = JdbcConnection.patternBasedFactory(URL_PATTERN,
-                                                                                    org.postgresql.Driver.class.getName(),
-                                                                                    PostgresConnection.class.getClassLoader());
+            org.postgresql.Driver.class.getName(),
+            PostgresConnection.class.getClassLoader());
 
     private static final String SQL_NON_ARRAY_TYPES = "SELECT t.oid AS oid, t.typname AS name "
             + "FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n ON (t.typnamespace = n.oid) "
@@ -65,7 +67,7 @@ public class PostgresConnection extends JdbcConnection {
     /**
      * Obtaining a replication slot may fail if there's a pending transaction. We're retrying to get a slot for 30 min.
      */
-    private static final int MAX_ATTEMPTS_FOR_OBTAINING_REPLICATION_SLOT =  900;
+    private static final int MAX_ATTEMPTS_FOR_OBTAINING_REPLICATION_SLOT = 900;
 
     private static final Duration PAUSE_BETWEEN_REPLICATION_SLOT_RETRIEVAL_ATTEMPTS = Duration.ofSeconds(2);
 
@@ -81,11 +83,18 @@ public class PostgresConnection extends JdbcConnection {
     public PostgresConnection(Configuration config) {
         super(config, FACTORY, PostgresConnection::validateServerVersion, PostgresConnection::defaultSettings);
 
+        Connection pgConnection = null;
         try {
-            typeRegistry = initTypeRegistry(connection());
+            pgConnection = connection();
+            typeRegistry = initTypeRegistry(pgConnection);
         }
         catch (SQLException e) {
-            throw new ConnectException("Could not initialize type registry", e);
+            if (pgConnection == null) {
+                throw new ConnectException("Could not create PG connection", e);
+            }
+            else {
+                throw new ConnectException("Could not initialize type registry", e);
+            }
         }
 
         databaseCharset = determineDatabaseCharset();
@@ -120,40 +129,98 @@ public class PostgresConnection extends JdbcConnection {
         }, rs -> {
             if (rs.next()) {
                 replIdentity.append(rs.getString(1));
-            } else {
+            }
+            else {
                 LOGGER.warn("Cannot determine REPLICA IDENTITY information for table '{}'", tableId);
             }
         });
         return ServerInfo.ReplicaIdentity.parseFromDB(replIdentity.toString());
     }
 
-    protected ServerInfo.ReplicationSlot readReplicationSlotInfo(String slotName, String pluginName) throws SQLException, InterruptedException {
+    /**
+     * Returns the current state of the replication slot
+     * @param slotName the name of the slot
+     * @param pluginName the name of the plugin used for the desired slot
+     * @return the {@link SlotState} or null, if no slot state is found
+     * @throws SQLException
+     */
+    public SlotState getReplicationSlotState(String slotName, String pluginName) throws SQLException {
+        ServerInfo.ReplicationSlot slot;
+        try {
+            slot = readReplicationSlotInfo(slotName, pluginName);
+            if (slot.equals(ServerInfo.ReplicationSlot.INVALID)) {
+                return null;
+            }
+            else {
+                return slot.asSlotState();
+            }
+        }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ConnectException("Interrupted while waiting for valid replication slot info", e);
+        }
+    }
+
+    /**
+     * Fetches the state of a replication stage given a slot name and plugin name
+     * @param slotName the name of the slot
+     * @param pluginName the name of the plugin used for the desired slot
+     * @return the {@link ServerInfo.ReplicationSlot} object or a {@link ServerInfo.ReplicationSlot#INVALID} if
+     *         the slot is not valid
+     * @throws SQLException is thrown by the underlying JDBC
+     */
+    private ServerInfo.ReplicationSlot fetchReplicationSlotInfo(String slotName, String pluginName) throws SQLException {
+        final String database = database();
+        final ServerInfo.ReplicationSlot slot = queryForSlot(slotName, database, pluginName,
+                rs -> {
+                    if (rs.next()) {
+                        boolean active = rs.getBoolean("active");
+                        Long confirmedFlushedLsn = parseConfirmedFlushLsn(slotName, pluginName, database, rs);
+                        if (confirmedFlushedLsn == null) {
+                            return null;
+                        }
+                        Long restartLsn = parseRestartLsn(slotName, pluginName, database, rs);
+                        if (restartLsn == null) {
+                            return null;
+                        }
+                        Long xmin = rs.getLong("catalog_xmin");
+                        return new ServerInfo.ReplicationSlot(active, confirmedFlushedLsn, restartLsn, xmin);
+                    }
+                    else {
+                        LOGGER.debug("No replication slot '{}' is present for plugin '{}' and database '{}'", slotName,
+                                pluginName, database);
+                        return ServerInfo.ReplicationSlot.INVALID;
+                    }
+                });
+        return slot;
+    }
+
+    /**
+     * Fetches a replication slot, repeating the query until either the slot is created or until
+     * the max number of attempts has been reached
+     *
+     * To fetch the slot without the retries, use the {@link PostgresConnection#fetchReplicationSlotInfo} call
+     * @param slotName the slot name
+     * @param pluginName the name of the plugin
+     * @return the {@link ServerInfo.ReplicationSlot} object or a {@link ServerInfo.ReplicationSlot#INVALID} if
+     *         the slot is not valid
+     * @throws SQLException is thrown by the underyling jdbc driver
+     * @throws InterruptedException is thrown if we don't return an answer within the set number of retries
+     */
+    @VisibleForTesting
+    ServerInfo.ReplicationSlot readReplicationSlotInfo(String slotName, String pluginName) throws SQLException, InterruptedException {
         final String database = database();
         final Metronome metronome = Metronome.parker(PAUSE_BETWEEN_REPLICATION_SLOT_RETRIEVAL_ATTEMPTS, Clock.SYSTEM);
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS_FOR_OBTAINING_REPLICATION_SLOT; attempt++) {
-            final ServerInfo.ReplicationSlot slot = queryForSlot(slotName, database, pluginName,
-                    rs -> {
-                        if (rs.next()) {
-                            boolean active = rs.getBoolean("active");
-                            Long confirmedFlushedLSN = parseConfirmedFlushLsn(slotName, pluginName, database, rs);
-                            if (confirmedFlushedLSN == null) {
-                                return null;
-                            }
-                            return new ServerInfo.ReplicationSlot(active, confirmedFlushedLSN);
-                        }
-                        else {
-                            LOGGER.debug("No replication slot '{}' is present for plugin '{}' and database '{}'", slotName,
-                                         pluginName, database);
-                            return ServerInfo.ReplicationSlot.INVALID;
-                        }
-                    }
-               );
+            final ServerInfo.ReplicationSlot slot = fetchReplicationSlotInfo(slotName, pluginName);
             if (slot != null) {
                 LOGGER.info("Obtained valid replication slot {}", slot);
                 return slot;
             }
-            LOGGER.warn("Cannot obtain valid replication slot '{}' for plugin '{}' and database '{}' [during attempt {} out of {}, concurrent tx probably blocks taking snapshot.", slotName, pluginName, database, attempt, MAX_ATTEMPTS_FOR_OBTAINING_REPLICATION_SLOT);
+            LOGGER.warn(
+                    "Cannot obtain valid replication slot '{}' for plugin '{}' and database '{}' [during attempt {} out of {}, concurrent tx probably blocks taking snapshot.",
+                    slotName, pluginName, database, attempt, MAX_ATTEMPTS_FOR_OBTAINING_REPLICATION_SLOT);
             metronome.pause();
         }
 
@@ -162,7 +229,8 @@ public class PostgresConnection extends JdbcConnection {
     }
 
     protected ServerInfo.ReplicationSlot queryForSlot(String slotName, String database, String pluginName,
-                                                      ResultSetMapper<ServerInfo.ReplicationSlot> map) throws SQLException {
+                                                      ResultSetMapper<ServerInfo.ReplicationSlot> map)
+            throws SQLException {
         return prepareQueryAndMap("select * from pg_replication_slots where slot_name = ? and database = ? and plugin = ?", statement -> {
             statement.setString(1, slotName);
             statement.setString(2, database);
@@ -191,6 +259,18 @@ public class PostgresConnection extends JdbcConnection {
         }
 
         return confirmedFlushedLsn;
+    }
+
+    private Long parseRestartLsn(String slotName, String pluginName, String database, ResultSet rs) {
+        Long restartLsn = null;
+        try {
+            restartLsn = tryParseLsn(slotName, pluginName, database, rs, "restart_lsn");
+        }
+        catch (SQLException e) {
+            throw new ConnectException("restart_lsn could be found");
+        }
+
+        return restartLsn;
     }
 
     private Long tryParseLsn(String slotName, String pluginName, String database, ResultSet rs, String column) throws ConnectException, SQLException {
@@ -243,11 +323,35 @@ public class PostgresConnection extends JdbcConnection {
         }
     }
 
+    /**
+     * Drops the debezium publication that was created.
+     *
+     * @param publicationName the publication name, may not be null
+     * @return {@code true} if the publication was dropped, {@code false} otherwise
+     */
+    public boolean dropPublication(String publicationName) {
+        try {
+            LOGGER.debug("Dropping publication '{}'", publicationName);
+            execute("DROP PUBLICATION " + publicationName);
+            return true;
+        }
+        catch (SQLException e) {
+            if (PSQLState.UNDEFINED_OBJECT.getState().equals(e.getSQLState())) {
+                LOGGER.debug("Publication {} has already been dropped", publicationName);
+            }
+            else {
+                LOGGER.error("Unexpected error while attempting to drop publication", e);
+            }
+            return false;
+        }
+    }
+
     @Override
     public synchronized void close() {
         try {
             super.close();
-        } catch (SQLException e) {
+        }
+        catch (SQLException e) {
             LOGGER.error("Unexpected error while closing Postgres connection", e);
         }
     }
@@ -304,15 +408,15 @@ public class PostgresConnection extends JdbcConnection {
         if (username != null) {
             query("SELECT oid, rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication FROM pg_roles " +
                     "WHERE pg_has_role('" + username + "', oid, 'member')",
-                  rs -> {
-                      while (rs.next()) {
-                          String roleInfo = "superuser: " + rs.getBoolean(3) + ", replication: " + rs.getBoolean(8) +
-                                  ", inherit: " + rs.getBoolean(4) + ", create role: " + rs.getBoolean(5) +
-                                  ", create db: " + rs.getBoolean(6) + ", can log in: " + rs.getBoolean(7);
-                          String roleName = rs.getString(2);
-                          serverInfo.addRole(roleName, roleInfo);
-                      }
-                  });
+                    rs -> {
+                        while (rs.next()) {
+                            String roleInfo = "superuser: " + rs.getBoolean(3) + ", replication: " + rs.getBoolean(8) +
+                                    ", inherit: " + rs.getBoolean(4) + ", create role: " + rs.getBoolean(5) +
+                                    ", create db: " + rs.getBoolean(6) + ", can log in: " + rs.getBoolean(7);
+                            String roleName = rs.getString(2);
+                            serverInfo.addRole(roleName, roleInfo);
+                        }
+                    });
         }
         return serverInfo;
     }
@@ -362,14 +466,13 @@ public class PostgresConnection extends JdbcConnection {
                     while (rs.next()) {
                         // Coerce long to int so large unsigned values are represented as signed
                         // Same technique is used in TypeInfoCache
-                        final int oid = (int)rs.getLong("oid");
+                        final int oid = (int) rs.getLong("oid");
                         String typeName = rs.getString("name");
                         typeRegistryBuilder.addType(new PostgresType(
                                 typeName,
                                 oid,
                                 sqlTypeMapper.getSqlType(typeName),
-                                typeInfo
-                        ));
+                                typeInfo));
                     }
                 }
 
@@ -377,21 +480,19 @@ public class PostgresConnection extends JdbcConnection {
                 try (final ResultSet rs = statement.executeQuery(SQL_ARRAY_TYPES)) {
                     while (rs.next()) {
                         // int2vector and oidvector will not be treated as arrays
-                        final int oid = (int)rs.getLong("oid");
+                        final int oid = (int) rs.getLong("oid");
                         String typeName = rs.getString("name");
                         typeRegistryBuilder.addType(new PostgresType(
                                 typeName,
                                 oid,
                                 sqlTypeMapper.getSqlType(typeName),
-                                typeInfo,
-                                typeRegistryBuilder.get((int)rs.getLong("element"))
-                        ));
+                                typeInfo, typeRegistryBuilder.get((int) rs.getLong("element"))));
                     }
                 }
             }
         }
         catch (SQLException e) {
-            throw new ConnectException("Could not intialize type registry", e);
+            throw new ConnectException("Database connection failed during intializiation of the type registry", e);
         }
         return typeRegistryBuilder.build();
     }
@@ -454,7 +555,7 @@ public class PostgresConnection extends JdbcConnection {
                 try {
                     return sqlTypesByPgTypeNames.get(typeName);
                 }
-                catch(Exception e) {
+                catch (Exception e) {
                     LOGGER.warn("Failed to obtain SQL type information for type {} via custom statement, falling back to TypeInfo#getSQLType()", typeName, e);
                     return typeInfo.getSQLType(typeName);
                 }

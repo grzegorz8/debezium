@@ -5,7 +5,14 @@
  */
 package io.debezium.connector.mongodb;
 
-import io.debezium.schema.TopicSelector;
+import static io.debezium.data.Envelope.FieldName.AFTER;
+import static org.fest.assertions.Assertions.assertThat;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.bson.BsonTimestamp;
@@ -16,20 +23,14 @@ import org.bson.types.ObjectId;
 import org.junit.Before;
 import org.junit.Test;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-
-import static io.debezium.data.Envelope.FieldName.AFTER;
-import static org.fest.assertions.Assertions.assertThat;
+import io.debezium.config.Configuration;
+import io.debezium.schema.TopicSelector;
 
 public class FieldBlacklistTest {
 
     private static final String SERVER_NAME = "serverX";
     private static final String PATCH = "patch";
-    private static final JsonWriterSettings WRITER_SETTINGS =
-            new JsonWriterSettings(JsonMode.STRICT, "", ""); // most compact JSON
+    private static final JsonWriterSettings WRITER_SETTINGS = new JsonWriterSettings(JsonMode.STRICT, "", ""); // most compact JSON
 
     private Configurator build;
     private SourceInfo source;
@@ -38,7 +39,10 @@ public class FieldBlacklistTest {
     @Before
     public void setup() {
         build = new Configurator();
-        source = new SourceInfo(SERVER_NAME);
+        source = new SourceInfo(new MongoDbConnectorConfig(
+                Configuration.create()
+                        .with(MongoDbConnectorConfig.LOGICAL_NAME, SERVER_NAME)
+                        .build()));
         topicSelector = MongoDbTopicSelector.defaultSelector(SERVER_NAME, "__debezium-heartbeat");
     }
 
@@ -84,11 +88,13 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordObject(collectionId, obj, 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"_id\" : {\"$oid\" : \"" + objId + "\"},"
-                +     "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +     "\"scores\" : [1.2, 3.4, 5.6]"
+                +     "\"_id\": {\"$oid\": \"" + objId + "\"},"
+                +     "\"phone\": {\"$numberLong\": \"123\"},"
+                +     "\"scores\": [1.2,3.4,5.6]"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(AFTER)).isEqualTo(expected);
     }
@@ -139,15 +145,17 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordObject(collectionId, obj, 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"_id\" : {\"$oid\" : \"" + objId + "\"},"
-                +     "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +     "\"address\" : {"
-                +         "\"street\" : \"Claude Debussylaan\","
-                +         "\"city\" : \"Amsterdam\""
+                +     "\"_id\": {\"$oid\": \"" + objId + "\"},"
+                +     "\"phone\": {\"$numberLong\": \"123\"},"
+                +     "\"address\": {"
+                +         "\"street\": \"Claude Debussylaan\","
+                +         "\"city\": \"Amsterdam\""
                 +     "},"
-                +     "\"scores\" : [1.2, 3.4, 5.6]"
+                +     "\"scores\": [1.2,3.4,5.6]"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(AFTER)).isEqualTo(expected);
     }
@@ -198,11 +206,13 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createEvent(obj, "i"), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"_id\" : {\"$oid\" : \"" + objId + "\"},"
-                +     "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +     "\"scores\" : [1.2, 3.4, 5.6]"
+                +     "\"_id\": {\"$oid\": \"" + objId + "\"},"
+                +     "\"phone\": {\"$numberLong\": \"123\"},"
+                +     "\"scores\": [1.2,3.4,5.6]"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(AFTER)).isEqualTo(expected);
     }
@@ -253,15 +263,17 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createEvent(obj, "i"), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"_id\" : {\"$oid\" : \"" + objId + "\"},"
-                +     "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +     "\"address\" : {"
-                +         "\"street\" : \"Claude Debussylaan\","
-                +         "\"city\" : \"Amsterdam\""
+                +     "\"_id\": {\"$oid\": \"" + objId + "\"},"
+                +     "\"phone\": {\"$numberLong\": \"123\"},"
+                +     "\"address\": {"
+                +         "\"street\": \"Claude Debussylaan\","
+                +         "\"city\": \"Amsterdam\""
                 +     "},"
-                +     "\"scores\" : [1.2, 3.4, 5.6]"
+                +     "\"scores\": [1.2,3.4,5.6]"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(AFTER)).isEqualTo(expected);
     }
@@ -312,11 +324,13 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"_id\" : {\"$oid\" : \"" + objId + "\"},"
-                +     "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +     "\"scores\" : [1.2, 3.4, 5.6]"
+                +     "\"_id\": {\"$oid\": \"" + objId + "\"},"
+                +     "\"phone\": {\"$numberLong\": \"123\"},"
+                +     "\"scores\": [1.2,3.4,5.6]"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -367,15 +381,17 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"_id\" : {\"$oid\" : \"" + objId + "\"},"
-                +     "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +     "\"address\" : {"
-                +         "\"street\" : \"Claude Debussylaan\","
-                +         "\"city\" : \"Amsterdam\""
+                +     "\"_id\": {\"$oid\": \"" + objId + "\"},"
+                +     "\"phone\": {\"$numberLong\": \"123\"},"
+                +     "\"address\": {"
+                +         "\"street\": \"Claude Debussylaan\","
+                +         "\"city\": \"Amsterdam\""
                 +     "},"
-                +     "\"scores\" : [1.2, 3.4, 5.6]"
+                +     "\"scores\": [1.2,3.4,5.6]"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -435,22 +451,24 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"_id\" : {\"$oid\" : \"" + objId + "\"},"
-                +     "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +     "\"addresses\" : ["
+                +     "\"_id\": {\"$oid\": \"" + objId + "\"},"
+                +     "\"phone\": {\"$numberLong\": \"123\"},"
+                +     "\"addresses\": ["
                 +         "{"
-                +             "\"street\" : \"Claude Debussylaan\","
-                +             "\"city\" : \"Amsterdam\""
-                +         "}, "
+                +             "\"street\": \"Claude Debussylaan\","
+                +             "\"city\": \"Amsterdam\""
+                +         "},"
                 +         "{"
-                +             "\"street\" : \"Fragkokklisias\","
-                +             "\"city\" : \"Athens\""
+                +             "\"street\": \"Fragkokklisias\","
+                +             "\"city\": \"Athens\""
                 +         "}"
                 +     "],"
-                +     "\"active\" : true,"
-                +     "\"scores\" : [1.2, 3.4, 5.6]"
+                +     "\"active\": true,"
+                +     "\"scores\": [1.2,3.4,5.6]"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -483,28 +501,30 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"_id\" : {\"$oid\" : \"" + objId + "\"},"
-                +     "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +     "\"addresses\" : ["
+                +     "\"_id\": {\"$oid\": \"" + objId + "\"},"
+                +     "\"phone\": {\"$numberLong\": \"123\"},"
+                +     "\"addresses\": ["
                 +         "["
                 +             "{"
-                +                 "\"number\" : {\"$numberLong\" : \"34\"},"
-                +                 "\"street\" : \"Claude Debussylaan\","
-                +                 "\"city\" : \"Amsterdam\""
+                +                 "\"number\": {\"$numberLong\": \"34\"},"
+                +                 "\"street\": \"Claude Debussylaan\","
+                +                 "\"city\": \"Amsterdam\""
                 +             "}"
-                +         "], "
+                +         "],"
                 +         "["
                 +             "{"
-                +                 "\"number\" : {\"$numberLong\" : \"7\"},"
-                +                 "\"street\" : \"Fragkokklisias\","
-                +                 "\"city\" : \"Athens\""
+                +                 "\"number\": {\"$numberLong\": \"7\"},"
+                +                 "\"street\": \"Fragkokklisias\","
+                +                 "\"city\": \"Athens\""
                 +             "}"
                 +         "]"
                 +     "],"
-                +     "\"active\" : true,"
-                +     "\"scores\" : [1.2, 3.4, 5.6]"
+                +     "\"active\": true,"
+                +     "\"scores\": [1.2,3.4,5.6]"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -526,11 +546,13 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$set\" : {"
-                +         "\"phone\" : {\"$numberLong\" : \"123\"}"
+                +     "\"$set\": {"
+                +         "\"phone\": {\"$numberLong\": \"123\"}"
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -552,11 +574,13 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$unset\" : {"
-                +         "\"phone\" : \"\""
+                +     "\"$unset\": {"
+                +         "\"phone\": \"\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -582,15 +606,17 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$set\" : {"
-                +         "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +         "\"address\" : {"
-                +             "\"street\" : \"Claude Debussylaan\","
-                +             "\"city\" : \"Amsterdam\""
+                +     "\"$set\": {"
+                +         "\"phone\": {\"$numberLong\": \"123\"},"
+                +         "\"address\": {"
+                +             "\"street\": \"Claude Debussylaan\","
+                +             "\"city\": \"Amsterdam\""
                 +         "}"
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -621,21 +647,23 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$set\" : {"
-                +         "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +         "\"addresses\" : ["
+                +     "\"$set\": {"
+                +         "\"phone\": {\"$numberLong\": \"123\"},"
+                +         "\"addresses\": ["
                 +             "{"
-                +                 "\"street\" : \"Claude Debussylaan\","
-                +                 "\"city\" : \"Amsterdam\""
-                +             "}, "
+                +                 "\"street\": \"Claude Debussylaan\","
+                +                 "\"city\": \"Amsterdam\""
+                +             "},"
                 +             "{"
-                +                 "\"street\" : \"Fragkokklisias\","
-                +                 "\"city\" : \"Athens\""
+                +                 "\"street\": \"Fragkokklisias\","
+                +                 "\"city\": \"Athens\""
                 +             "}"
                 +         "]"
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -666,27 +694,29 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$set\" : {"
-                +         "\"phone\" : {\"$numberLong\" : \"123\"},"
-                +         "\"addresses\" : ["
+                +     "\"$set\": {"
+                +         "\"phone\": {\"$numberLong\": \"123\"},"
+                +         "\"addresses\": ["
                 +             "["
                 +                 "{"
-                +                     "\"number\" : {\"$numberLong\" : \"34\"},"
-                +                     "\"street\" : \"Claude Debussylaan\","
-                +                     "\"city\" : \"Amsterdam\""
+                +                     "\"number\": {\"$numberLong\": \"34\"},"
+                +                     "\"street\": \"Claude Debussylaan\","
+                +                     "\"city\": \"Amsterdam\""
                 +                 "}"
-                +             "], "
+                +             "],"
                 +             "["
                 +                 "{"
-                +                     "\"number\" : {\"$numberLong\" : \"7\"},"
-                +                     "\"street\" : \"Fragkokklisias\","
-                +                     "\"city\" : \"Athens\""
+                +                     "\"number\": {\"$numberLong\": \"7\"},"
+                +                     "\"street\": \"Fragkokklisias\","
+                +                     "\"city\": \"Athens\""
                 +                 "}"
                 +             "]"
                 +         "]"
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -710,18 +740,21 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$set\" : {"
-                +         "\"address.street\" : \"Claude Debussylaan\","
-                +         "\"address.city\" : \"Amsterdam\""
+                +     "\"$set\": {"
+                +         "\"address.street\": \"Claude Debussylaan\","
+                +         "\"address.city\": \"Amsterdam\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
 
     @Test
     public void shouldExcludeNestedFieldsForSetNestedFieldUpdateEventWithArrayOfEmbeddedDocuments() throws InterruptedException {
+        // @formatter:off
         // source document can have the following structure:
         // {
         //   "name": "Sally",
@@ -733,6 +766,7 @@ public class FieldBlacklistTest {
         //      }
         //   ]
         // }
+        // @formatter:on
 
         // given
         CollectionId collectionId = new CollectionId("rs0", "dbA", "c1");
@@ -751,19 +785,22 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$set\" : {"
-                +         "\"name\" : \"Sally\","
-                +         "\"addresses.0.street\" : \"Claude Debussylaan\","
-                +         "\"addresses.0.city\" : \"Amsterdam\""
+                +     "\"$set\": {"
+                +         "\"name\": \"Sally\","
+                +         "\"addresses.0.street\": \"Claude Debussylaan\","
+                +         "\"addresses.0.city\": \"Amsterdam\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
 
     @Test
     public void shouldNotExcludeNestedFieldsForSetNestedFieldUpdateEventWithArrayOfArrays() throws InterruptedException {
+        // @formatter:off
         // source document can have the following structure:
         // {
         //   "name": "Sally",
@@ -777,6 +814,7 @@ public class FieldBlacklistTest {
         //      ]
         //   ]
         // }
+        // @formatter:on
 
         // given
         CollectionId collectionId = new CollectionId("rs0", "dbA", "c1");
@@ -801,6 +839,7 @@ public class FieldBlacklistTest {
 
     @Test
     public void shouldExcludeNestedFieldsForSetNestedFieldUpdateEventWithSeveralArrays() throws InterruptedException {
+        // @formatter:off
         // source document can have the following structure:
         // {
         //   "name": "Sally",
@@ -816,6 +855,7 @@ public class FieldBlacklistTest {
         //      }
         //   ]
         // }
+        // @formatter:on
 
         // given
         CollectionId collectionId = new CollectionId("rs0", "dbA", "c1");
@@ -834,19 +874,22 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$set\" : {"
-                +         "\"name\" : \"Sally\","
-                +         "\"addresses.0.second.0.street\" : \"Claude Debussylaan\","
-                +         "\"addresses.0.second.0.city\" : \"Amsterdam\""
+                +     "\"$set\": {"
+                +         "\"name\": \"Sally\","
+                +         "\"addresses.0.second.0.street\": \"Claude Debussylaan\","
+                +         "\"addresses.0.second.0.city\": \"Amsterdam\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
 
     @Test
     public void shouldExcludeFieldsForSetNestedFieldUpdateEventWithArrayOfEmbeddedDocuments() throws InterruptedException {
+        // @formatter:off
         // source document can have the following structure:
         // {
         //   "name": "Sally",
@@ -858,6 +901,7 @@ public class FieldBlacklistTest {
         //      }
         //   ]
         // }
+        // @formatter:on
 
         // given
         CollectionId collectionId = new CollectionId("rs0", "dbA", "c1");
@@ -876,17 +920,20 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$set\" : {"
-                +         "\"name\" : \"Sally\""
+                +     "\"$set\": {"
+                +         "\"name\": \"Sally\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
 
     @Test
     public void shouldExcludeFieldsForSetToArrayFieldUpdateEventWithArrayOfEmbeddedDocuments() throws InterruptedException {
+        // @formatter:off
         // source document can have the following structure:
         // {
         //   "name": "Sally",
@@ -898,6 +945,7 @@ public class FieldBlacklistTest {
         //      }
         //   ]
         // }
+        // @formatter:on
 
         // given
         CollectionId collectionId = new CollectionId("rs0", "dbA", "c1");
@@ -917,11 +965,13 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$set\" : {"
-                +         "\"name\" : \"Sally\""
+                +     "\"$set\": {"
+                +         "\"name\": \"Sally\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
@@ -945,18 +995,21 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$unset\" : {"
-                +         "\"address.street\" : \"\","
-                +         "\"address.city\" : \"\""
+                +     "\"$unset\": {"
+                +         "\"address.street\": \"\","
+                +         "\"address.city\": \"\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
 
     @Test
     public void shouldExcludeNestedFieldsForUnsetNestedFieldUpdateEventWithArrayOfEmbeddedDocuments() throws InterruptedException {
+        // @formatter:off
         // source document can have the following structure:
         // {
         //   "name": "Sally",
@@ -968,6 +1021,7 @@ public class FieldBlacklistTest {
         //      }
         //   ]
         // }
+        // @formatter:on
 
         // given
         CollectionId collectionId = new CollectionId("rs0", "dbA", "c1");
@@ -986,19 +1040,22 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$unset\" : {"
-                +         "\"name\" : \"\","
-                +         "\"addresses.0.street\" : \"\","
-                +         "\"addresses.0.city\" : \"\""
+                +     "\"$unset\": {"
+                +         "\"name\": \"\","
+                +         "\"addresses.0.street\": \"\","
+                +         "\"addresses.0.city\": \"\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
 
     @Test
     public void shouldNotExcludeNestedFieldsForUnsetNestedFieldUpdateEventWithArrayOfArrays() throws InterruptedException {
+        // @formatter:off
         // source document can have the following structure:
         // {
         //   "name": "Sally",
@@ -1012,6 +1069,7 @@ public class FieldBlacklistTest {
         //      ]
         //   ]
         // }
+        // @formatter:on
 
         // given
         CollectionId collectionId = new CollectionId("rs0", "dbA", "c1");
@@ -1036,6 +1094,7 @@ public class FieldBlacklistTest {
 
     @Test
     public void shouldExcludeNestedFieldsForUnsetNestedFieldUpdateEventWithSeveralArrays() throws InterruptedException {
+        // @formatter:off
         // source document can have the following structure:
         // {
         //   "name": "Sally",
@@ -1051,6 +1110,7 @@ public class FieldBlacklistTest {
         //      }
         //   ]
         // }
+        // @formatter:on
 
         // given
         CollectionId collectionId = new CollectionId("rs0", "dbA", "c1");
@@ -1069,19 +1129,22 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$unset\" : {"
-                +         "\"name\" : \"\","
-                +         "\"addresses.0.second.0.street\" : \"\","
-                +         "\"addresses.0.second.0.city\" : \"\""
+                +     "\"$unset\": {"
+                +         "\"name\": \"\","
+                +         "\"addresses.0.second.0.street\": \"\","
+                +         "\"addresses.0.second.0.city\": \"\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }
 
     @Test
     public void shouldExcludeFieldsForUnsetNestedFieldUpdateEventWithArrayOfEmbeddedDocuments() throws InterruptedException {
+        // @formatter:off
         // source document can have the following structure:
         // {
         //   "name": "Sally",
@@ -1093,6 +1156,7 @@ public class FieldBlacklistTest {
         //      }
         //   ]
         // }
+        // @formatter:on
 
         // given
         CollectionId collectionId = new CollectionId("rs0", "dbA", "c1");
@@ -1111,11 +1175,13 @@ public class FieldBlacklistTest {
         recordMakers.forCollection(collectionId).recordEvent(createUpdateEvent(obj, objId), 1002);
 
         // then
+        // @formatter:off
         String expected = "{"
-                +     "\"$unset\" : {"
-                +         "\"name\" : \"\""
+                +     "\"$unset\": {"
+                +         "\"name\": \"\""
                 +     "}"
                 + "}";
+        // @formatter:on
         Struct value = getValue(produced);
         assertThat(value.get(PATCH)).isEqualTo(expected);
     }

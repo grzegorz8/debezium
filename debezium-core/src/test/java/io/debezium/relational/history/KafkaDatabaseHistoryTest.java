@@ -24,8 +24,8 @@ import org.junit.Test;
 import io.debezium.config.Configuration;
 import io.debezium.kafka.KafkaCluster;
 import io.debezium.relational.Tables;
-import io.debezium.relational.ddl.LegacyDdlParser;
 import io.debezium.relational.ddl.DdlParserSql2003;
+import io.debezium.relational.ddl.LegacyDdlParser;
 import io.debezium.text.ParsingException;
 import io.debezium.util.Collect;
 import io.debezium.util.Testing;
@@ -55,23 +55,31 @@ public class KafkaDatabaseHistoryTest {
 
         // Configure the extra properties to
         kafka = new KafkaCluster().usingDirectory(dataDir)
-                                  .deleteDataPriorToStartup(true)
-                                  .deleteDataUponShutdown(true)
-                                  .addBrokers(1)
-                                  .withKafkaConfiguration(Collect.propertiesOf("auto.create.topics.enable", "false"))
-                                  .startup();
+                .deleteDataPriorToStartup(true)
+                .deleteDataUponShutdown(true)
+                .addBrokers(1)
+                .withKafkaConfiguration(Collect.propertiesOf(
+                        "auto.create.topics.enable", "false",
+                        "zookeeper.session.timeout.ms", "20000"))
+                .startup();
         history = new KafkaDatabaseHistory();
     }
 
     @After
     public void afterEach() {
         try {
-            if (history != null) history.stop();
-        } finally {
+            if (history != null) {
+                history.stop();
+            }
+        }
+        finally {
             history = null;
             try {
-                if (kafka != null) kafka.shutdown();
-            } finally {
+                if (kafka != null) {
+                    kafka.shutdown();
+                }
+            }
+            finally {
                 kafka = null;
             }
         }
@@ -87,22 +95,22 @@ public class KafkaDatabaseHistoryTest {
     private void testHistoryTopicContent(boolean skipUnparseableDDL) {
         // Start up the history ...
         Configuration config = Configuration.create()
-                                            .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, kafka.brokerList())
-                                            .with(KafkaDatabaseHistory.TOPIC, topicName)
-                                            .with(DatabaseHistory.NAME, "my-db-history")
-                                            .with(KafkaDatabaseHistory.RECOVERY_POLL_INTERVAL_MS, 500)
-                                            // new since 0.10.1.0 - we want a low value because we're running everything locally
-                                            // in this test. However, it can't be so low that the broker returns the same
-                                            // messages more than once.
-                                            .with(KafkaDatabaseHistory.consumerConfigPropertyName(
-                                                  ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG),
-                                                  100)
-                                            .with(KafkaDatabaseHistory.consumerConfigPropertyName(
-                                                  ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG),
-                                                  50000)
-                                            .with(KafkaDatabaseHistory.SKIP_UNPARSEABLE_DDL_STATEMENTS, skipUnparseableDDL)
-                                            .build();
-        history.configure(config, null);
+                .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, kafka.brokerList())
+                .with(KafkaDatabaseHistory.TOPIC, topicName)
+                .with(DatabaseHistory.NAME, "my-db-history")
+                .with(KafkaDatabaseHistory.RECOVERY_POLL_INTERVAL_MS, 500)
+                // new since 0.10.1.0 - we want a low value because we're running everything locally
+                // in this test. However, it can't be so low that the broker returns the same
+                // messages more than once.
+                .with(KafkaDatabaseHistory.consumerConfigPropertyName(
+                        ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG),
+                        100)
+                .with(KafkaDatabaseHistory.consumerConfigPropertyName(
+                        ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG),
+                        50000)
+                .with(KafkaDatabaseHistory.SKIP_UNPARSEABLE_DDL_STATEMENTS, skipUnparseableDDL)
+                .build();
+        history.configure(config, null, DatabaseHistoryMetrics.NOOP, true);
         history.start();
 
         // Should be able to call start more than once ...
@@ -161,7 +169,7 @@ public class KafkaDatabaseHistoryTest {
         // Stop the history (which should stop the producer) ...
         history.stop();
         history = new KafkaDatabaseHistory();
-        history.configure(config, null);
+        history.configure(config, null, DatabaseHistoryListener.NOOP, true);
         // no need to start
 
         // Recover from the very beginning to just past the first change ...
@@ -191,7 +199,7 @@ public class KafkaDatabaseHistoryTest {
 
     protected void setLogPosition(int index) {
         this.position = Collect.hashMapOf("filename", "my-txn-file.log",
-                                          "position", index);
+                "position", index);
     }
 
     @Test
@@ -270,15 +278,15 @@ public class KafkaDatabaseHistoryTest {
                 // in this test. However, it can't be so low that the broker returns the same
                 // messages more than once.
                 .with(KafkaDatabaseHistory.consumerConfigPropertyName(
-                      ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG),
-                      100)
+                        ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG),
+                        100)
                 .with(KafkaDatabaseHistory.consumerConfigPropertyName(
-                      ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG),
-                      50000)
+                        ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG),
+                        50000)
                 .with(KafkaDatabaseHistory.SKIP_UNPARSEABLE_DDL_STATEMENTS, true)
                 .build();
 
-        history.configure(config, null);
+        history.configure(config, null, DatabaseHistoryMetrics.NOOP, true);
         history.start();
 
         // dummytopic should not exist yet

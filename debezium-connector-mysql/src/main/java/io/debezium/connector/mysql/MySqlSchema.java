@@ -19,6 +19,7 @@ import io.debezium.annotation.NotThreadSafe;
 import io.debezium.config.Configuration;
 import io.debezium.connector.mysql.MySqlConnectorConfig.BigIntUnsignedHandlingMode;
 import io.debezium.connector.mysql.MySqlSystemVariables.MySqlScope;
+import io.debezium.connector.mysql.antlr.MySqlAntlrDdlParser;
 import io.debezium.document.Document;
 import io.debezium.jdbc.JdbcValueConverters.BigIntUnsignedMode;
 import io.debezium.jdbc.JdbcValueConverters.DecimalMode;
@@ -34,6 +35,7 @@ import io.debezium.relational.ddl.DdlChanges;
 import io.debezium.relational.ddl.DdlChanges.DatabaseStatementStringConsumer;
 import io.debezium.relational.ddl.DdlParser;
 import io.debezium.relational.history.DatabaseHistory;
+import io.debezium.relational.history.DatabaseHistoryMetrics;
 import io.debezium.relational.history.HistoryRecordComparator;
 import io.debezium.schema.TopicSelector;
 import io.debezium.text.MultipleParsingExceptions;
@@ -72,6 +74,7 @@ public class MySqlSchema extends RelationalDatabaseSchema {
     private final HistoryRecordComparator historyComparator;
     private final boolean skipUnparseableDDL;
     private final boolean storeOnlyMonitoredTablesDdl;
+    private boolean recoveredTables;
 
     /**
      * Create a schema component given the supplied {@link MySqlConnectorConfig MySQL connector configuration}.
@@ -93,10 +96,10 @@ public class MySqlSchema extends RelationalDatabaseSchema {
                 TableFilter.fromPredicate(tableFilters.tableFilter()),
                 tableFilters.columnFilter(),
                 new TableSchemaBuilder(
-                        getValueConverters(configuration), SchemaNameAdjuster.create(logger), SourceInfo.SCHEMA)
-                ,
-                tableIdCaseInsensitive
-        );
+                        getValueConverters(configuration), SchemaNameAdjuster.create(logger), configuration.getSourceInfoStructMaker().schema(),
+                        configuration.getSanitizeFieldNames()),
+                tableIdCaseInsensitive,
+                configuration.getKeyMapper());
 
         Configuration config = configuration.getConfig();
 
@@ -105,16 +108,13 @@ public class MySqlSchema extends RelationalDatabaseSchema {
         // Do not remove the prefix from the subset of config properties ...
         String connectorName = config.getString("name", configuration.getLogicalName());
         Configuration dbHistoryConfig = config.subset(DatabaseHistory.CONFIGURATION_FIELD_PREFIX_STRING, false)
-                                              .edit()
-                                              .withDefault(DatabaseHistory.NAME, connectorName + "-dbhistory")
-                                              .build();
+                .edit()
+                .withDefault(DatabaseHistory.NAME, connectorName + "-dbhistory")
+                .build();
         this.skipUnparseableDDL = dbHistoryConfig.getBoolean(DatabaseHistory.SKIP_UNPARSEABLE_DDL_STATEMENTS);
         this.storeOnlyMonitoredTablesDdl = dbHistoryConfig.getBoolean(DatabaseHistory.STORE_ONLY_MONITORED_TABLES_DDL);
 
-        this.ddlParser = configuration.getDdlParsingMode().getNewParserInstance(
-                getValueConverters(configuration),
-                getTableFilter()
-        );
+        this.ddlParser = new MySqlAntlrDdlParser(getValueConverters(configuration), getTableFilter());
         this.ddlChanges = this.ddlParser.getDdlChanges();
 
         // Create and configure the database history ...
@@ -131,15 +131,13 @@ public class MySqlSchema extends RelationalDatabaseSchema {
                 return SourceInfo.isPositionAtOrBefore(recorded, desired, gtidFilter);
             }
         };
-        this.dbHistory.configure(dbHistoryConfig, historyComparator); // validates
-
+        this.dbHistory.configure(dbHistoryConfig, historyComparator, new DatabaseHistoryMetrics(configuration), true); // validates
     }
 
     private static MySqlValueConverters getValueConverters(MySqlConnectorConfig configuration) {
         // Use MySQL-specific converters and schemas for values ...
 
-        String timePrecisionModeStr = configuration.getConfig().getString(MySqlConnectorConfig.TIME_PRECISION_MODE);
-        TemporalPrecisionMode timePrecisionMode = TemporalPrecisionMode.parse(timePrecisionModeStr);
+        TemporalPrecisionMode timePrecisionMode = configuration.getTemporalPrecisionMode();
 
         DecimalMode decimalMode = configuration.getDecimalMode();
 
@@ -147,7 +145,8 @@ public class MySqlSchema extends RelationalDatabaseSchema {
         BigIntUnsignedHandlingMode bigIntUnsignedHandlingMode = BigIntUnsignedHandlingMode.parse(bigIntUnsignedHandlingModeStr);
         BigIntUnsignedMode bigIntUnsignedMode = bigIntUnsignedHandlingMode.asBigIntUnsignedMode();
 
-        return new MySqlValueConverters(decimalMode, timePrecisionMode, bigIntUnsignedMode);
+        final boolean timeAdjusterEnabled = configuration.getConfig().getBoolean(MySqlConnectorConfig.ENABLE_TIME_ADJUSTER);
+        return new MySqlValueConverters(decimalMode, timePrecisionMode, bigIntUnsignedMode, timeAdjusterEnabled ? MySqlValueConverters::adjustTemporal : x -> x);
     }
 
     protected HistoryRecordComparator historyComparator() {
@@ -186,7 +185,7 @@ public class MySqlSchema extends RelationalDatabaseSchema {
         final Collection<TableId> tables = tableIds();
         String[] ret = new String[tables.size()];
         int i = 0;
-        for (TableId table: tables) {
+        for (TableId table : tables) {
             ret[i++] = table.toString();
         }
         return ret;
@@ -249,6 +248,7 @@ public class MySqlSchema extends RelationalDatabaseSchema {
     public void loadHistory(SourceInfo startingPoint) {
         tables().clear();
         dbHistory.recover(startingPoint.partition(), startingPoint.offset(), tables(), ddlParser);
+        recoveredTables = !tableIds().isEmpty();
         refreshSchemas();
     }
 
@@ -297,64 +297,65 @@ public class MySqlSchema extends RelationalDatabaseSchema {
     public boolean applyDdl(SourceInfo source, String databaseName, String ddlStatements,
                             DatabaseStatementStringConsumer statementConsumer) {
         Set<TableId> changes;
-        if (ignoredQueryStatements.contains(ddlStatements)) return false;
+        if (ignoredQueryStatements.contains(ddlStatements)) {
+            return false;
+        }
         try {
             this.ddlChanges.reset();
             this.ddlParser.setCurrentSchema(databaseName);
             this.ddlParser.parse(ddlStatements, tables());
-        } catch (ParsingException | MultipleParsingExceptions e) {
+        }
+        catch (ParsingException | MultipleParsingExceptions e) {
             if (skipUnparseableDDL) {
                 logger.warn("Ignoring unparseable DDL statement '{}': {}", ddlStatements, e);
-            } else {
+            }
+            else {
                 throw e;
             }
-        } finally {
-            changes = tables().drainChanges();
-            // No need to send schema events or store DDL if no table has changed
-            // Note that, unlike with the DB history topic, we don't filter out non-whitelisted tables here
-            // (which writes to the public schema change topic); if required, a second option could be added
-            // for controlling this, too
-            if (!storeOnlyMonitoredTablesDdl || !changes.isEmpty()) {
-                if (statementConsumer != null) {
+        }
+        changes = tables().drainChanges();
+        // No need to send schema events or store DDL if no table has changed
+        if (!storeOnlyMonitoredTablesDdl || ddlChanges.anyMatch(filters.databaseFilter(), filters.tableFilter())) {
+            if (statementConsumer != null) {
 
-                    // We are supposed to _also_ record the schema changes as SourceRecords, but these need to be filtered
-                    // by database. Unfortunately, the databaseName on the event might not be the same database as that
-                    // being modified by the DDL statements (since the DDL statements can have fully-qualified names).
-                    // Therefore, we have to look at each statement to figure out which database it applies and then
-                    // record the DDL statements (still in the same order) to those databases.
+                // We are supposed to _also_ record the schema changes as SourceRecords, but these need to be filtered
+                // by database. Unfortunately, the databaseName on the event might not be the same database as that
+                // being modified by the DDL statements (since the DDL statements can have fully-qualified names).
+                // Therefore, we have to look at each statement to figure out which database it applies and then
+                // record the DDL statements (still in the same order) to those databases.
 
-                    if (!ddlChanges.isEmpty() && ddlChanges.applyToMoreDatabasesThan(databaseName)) {
+                if (!ddlChanges.isEmpty() && ddlChanges.applyToMoreDatabasesThan(databaseName)) {
 
-                        // We understood at least some of the DDL statements and can figure out to which database they apply.
-                        // They also apply to more databases than 'databaseName', so we need to apply the DDL statements in
-                        // the same order they were read for each _affected_ database, grouped together if multiple apply
-                        // to the same _affected_ database...
-                        ddlChanges.groupStatementStringsByDatabase((dbName, ddl) -> {
-                            if (filters.databaseFilter().test(dbName) || dbName == null || "".equals(dbName)) {
-                                if (dbName == null) dbName = "";
-                                statementConsumer.consume(dbName, ddlStatements);
+                    // We understood at least some of the DDL statements and can figure out to which database they apply.
+                    // They also apply to more databases than 'databaseName', so we need to apply the DDL statements in
+                    // the same order they were read for each _affected_ database, grouped together if multiple apply
+                    // to the same _affected_ database...
+                    ddlChanges.groupStatementStringsByDatabase((dbName, tables, ddl) -> {
+                        if (filters.databaseFilter().test(dbName) || dbName == null || "".equals(dbName)) {
+                            if (dbName == null) {
+                                dbName = "";
                             }
-                        });
-                    } else if (filters.databaseFilter().test(databaseName) || databaseName == null || "".equals(databaseName)) {
-                        if (databaseName == null) databaseName = "";
-                        statementConsumer.consume(databaseName, ddlStatements);
-                    }
+                            statementConsumer.consume(dbName, tables, ddl);
+                        }
+                    });
                 }
-
-                // Record the DDL statement so that we can later recover them if needed. We do this _after_ writing the
-                // schema change records so that failure recovery (which is based on of the history) won't lose
-                // schema change records.
-                try {
-                    if (!storeOnlyMonitoredTablesDdl || changes.stream().anyMatch(filters().tableFilter()::test)) {
-                        dbHistory.record(source.partition(), source.offset(), databaseName, ddlStatements);
-                    } else {
-                        logger.debug("Changes for DDL '{}' were filtered and not recorded in database history", ddlStatements);
+                else if (filters.databaseFilter().test(databaseName) || databaseName == null || "".equals(databaseName)) {
+                    if (databaseName == null) {
+                        databaseName = "";
                     }
-                } catch (Throwable e) {
-                    throw new ConnectException(
-                            "Error recording the DDL statement(s) in the database history " + dbHistory + ": " + ddlStatements, e);
+                    statementConsumer.consume(databaseName, changes, ddlStatements);
                 }
             }
+
+            // Record the DDL statement so that we can later recover them if needed. We do this _after_ writing the
+            // schema change records so that failure recovery (which is based on of the history) won't lose
+            // schema change records.
+            if (!storeOnlyMonitoredTablesDdl || changes.stream().anyMatch(filters().tableFilter()::test)) {
+                dbHistory.record(source.partition(), source.offset(), databaseName, ddlStatements);
+            }
+        }
+        else {
+            logger.debug("Changes for DDL '{}' were filtered and not recorded in database history", ddlStatements);
         }
 
         // Figure out what changed ...
@@ -368,5 +369,17 @@ public class MySqlSchema extends RelationalDatabaseSchema {
             }
         });
         return true;
+    }
+
+    /**
+     * @return true if only monitored tables should be stored in database history, false if all tables should be stored
+     */
+    public boolean isStoreOnlyMonitoredTablesDdl() {
+        return storeOnlyMonitoredTablesDdl;
+    }
+
+    @Override
+    public boolean tableInformationComplete() {
+        return recoveredTables;
     }
 }

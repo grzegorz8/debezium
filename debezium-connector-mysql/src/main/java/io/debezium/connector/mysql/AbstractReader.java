@@ -72,7 +72,7 @@ public abstract class AbstractReader implements Reader {
         this.maxBatchSize = context.getConnectorConfig().getMaxBatchSize();
         this.pollInterval = context.getConnectorConfig().getPollInterval();
         this.metronome = Metronome.parker(pollInterval, Clock.SYSTEM);
-        this.acceptAndContinue = acceptAndContinue == null? new AcceptAllPredicate() : acceptAndContinue;
+        this.acceptAndContinue = acceptAndContinue == null ? new AcceptAllPredicate() : acceptAndContinue;
         this.changeEventQueueMetrics = new ChangeEventQueueMetrics() {
 
             @Override
@@ -148,7 +148,6 @@ public abstract class AbstractReader implements Reader {
         // do nothing
     }
 
-
     /**
      * The reader has been requested to de-initialize resources after stopping. This should only be
      * called once after {@link #doStop()}.
@@ -223,7 +222,8 @@ public abstract class AbstractReader implements Reader {
         if (error instanceof ServerException) {
             ServerException e = (ServerException) error;
             msg = msg + " Error code: " + e.getErrorCode() + "; SQLSTATE: " + e.getSqlState() + ".";
-        } else if (error instanceof SQLException) {
+        }
+        else if (error instanceof SQLException) {
             SQLException e = (SQLException) error;
             msg = e.getMessage() + " Error code: " + e.getErrorCode() + "; SQLSTATE: " + e.getSQLState() + ".";
         }
@@ -262,7 +262,7 @@ public abstract class AbstractReader implements Reader {
         // this reader has been stopped before it reached the success or failed end state, so clean up and abort
         if (!running.get()) {
             cleanupResources();
-            throw new InterruptedException( "Reader was stopped while polling" );
+            throw new InterruptedException("Reader was stopped while polling");
         }
 
         logger.trace("Polling for next batch of records");
@@ -274,7 +274,9 @@ public abstract class AbstractReader implements Reader {
 
             // Check for failure after waking up ...
             failureException = this.failure.get();
-            if (failureException != null) throw failureException;
+            if (failureException != null) {
+                throw failureException;
+            }
             if (timeout.expired()) {
                 break;
             }
@@ -300,7 +302,8 @@ public abstract class AbstractReader implements Reader {
     protected void cleanupResources() {
         try {
             doCleanup();
-        } finally {
+        }
+        finally {
             Runnable completionHandler = uponCompletion.getAndSet(null); // set to null so that we call it only once
             if (completionHandler != null) {
                 completionHandler.run();

@@ -3,7 +3,7 @@
     <parent>
         <groupId>io.debezium</groupId>
         <artifactId>debezium-parent</artifactId>
-        <version>0.9.0-SNAPSHOT</version>
+        <version>1.0.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
@@ -42,6 +42,12 @@
         <dependency>
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.google.protobuf</groupId>
+                    <artifactId>protobuf-java</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <!-- Testing -->
@@ -113,8 +119,6 @@
         <docker.filter>debezium/mysql-server-test-database</docker.filter>
         <docker.skip>false</docker.skip>
         <docker.initimage>ln -s /usr/share/zoneinfo/US/Samoa /etc/localtime</docker.initimage>
-
-        <ddl.parser.mode>antlr</ddl.parser.mode>
     </properties>
     <build>
         <plugins>
@@ -327,8 +331,8 @@
                         <database.replica.hostname>${docker.host.address}</database.replica.hostname>
                         <database.replica.port>${mysql.replica.port}</database.replica.port>
                         <skipLongRunningTests>${skipLongRunningTests}</skipLongRunningTests>
-                        <ddl.parser.mode>${ddl.parser.mode}</ddl.parser.mode>
                     </systemPropertyVariables>
+                    <runOrder>alphabetical</runOrder>
                 </configuration>
                 <executions>
                     <execution>
@@ -416,7 +420,7 @@
                                     <finalName>${project.artifactId}-${project.version}</finalName>
                                     <attach>true</attach>  <!-- we want attach & deploy these to Maven -->
                                     <descriptorRefs>
-                                        <descriptorRef>connector-distribution</descriptorRef>
+                                        <descriptorRef>${assembly.descriptor}</descriptorRef>
                                     </descriptorRefs>
                                 </configuration>
                             </execution>
@@ -443,7 +447,7 @@
                                 <database.port>${mysql.port}</database.port>
                                 <database.replica.port>${mysql.port}</database.replica.port>
                                 <skipLongRunningTests>false</skipLongRunningTests>
-                                <ddl.parser.mode>${ddl.parser.mode}</ddl.parser.mode>
+                                <runOrder>alphabetical</runOrder>
                             </systemPropertyVariables>
                         </configuration>
                         <executions>
@@ -547,14 +551,5 @@
         </properties>
       </profile>
 
-      <profile>
-        <id>parser-legacy</id>
-        <activation>
-          <activeByDefault>false</activeByDefault>
-        </activation>
-        <properties>
-          <ddl.parser.mode>legacy</ddl.parser.mode>
-        </properties>
-      </profile>
     </profiles>
 </project>

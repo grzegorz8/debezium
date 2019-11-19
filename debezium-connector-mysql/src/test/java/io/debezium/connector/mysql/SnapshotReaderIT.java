@@ -26,11 +26,13 @@ import org.junit.Before;
 import org.junit.Test;
 
 import io.debezium.config.Configuration;
+import io.debezium.config.Configuration.Builder;
 import io.debezium.data.KeyValueStore;
 import io.debezium.data.KeyValueStore.Collection;
 import io.debezium.data.SchemaChangeHistory;
 import io.debezium.data.VerifyRecord;
 import io.debezium.heartbeat.Heartbeat;
+import io.debezium.relational.history.DatabaseHistory;
 import io.debezium.util.Testing;
 
 /**
@@ -62,14 +64,16 @@ public class SnapshotReaderIT {
         if (reader != null) {
             try {
                 reader.stop();
-            } finally {
+            }
+            finally {
                 reader = null;
             }
         }
         if (context != null) {
             try {
                 context.shutdown();
-            } finally {
+            }
+            finally {
                 context = null;
                 Testing.Files.delete(DB_HISTORY_PATH);
             }
@@ -87,11 +91,31 @@ public class SnapshotReaderIT {
 
     @Test
     public void shouldCreateSnapshotOfSingleDatabase() throws Exception {
-        config = simpleConfig()
-                .build();
+        snapshotOfSingleDatabase(true, false);
+    }
+
+    @Test
+    public void shouldCreateSnapshotOfSingleDatabaseWithoutGlobalLock() throws Exception {
+        snapshotOfSingleDatabase(false, false);
+    }
+
+    @Test
+    public void shouldCreateSnapshotOfSingleDatabaseWithoutGlobalLockAndStoreOnlyMonitoredTables() throws Exception {
+        snapshotOfSingleDatabase(false, true);
+    }
+
+    private void snapshotOfSingleDatabase(boolean useGlobalLock, boolean storeOnlyMonitoredTables) throws Exception {
+        final Builder builder = simpleConfig();
+        if (!useGlobalLock) {
+            builder
+                    .with(MySqlConnectorConfig.USER, "cloud")
+                    .with(MySqlConnectorConfig.PASSWORD, "cloudpass")
+                    .with(DatabaseHistory.STORE_ONLY_MONITORED_TABLES_DDL, storeOnlyMonitoredTables);
+        }
+        config = builder.build();
         context = new MySqlTaskContext(config, new Filters.Builder(config).build());
         context.start();
-        reader = new SnapshotReader("snapshot", context);
+        reader = new SnapshotReader("snapshot", context, useGlobalLock);
         reader.uponCompletion(completed::countDown);
         reader.generateInsertEvents();
 
@@ -178,7 +202,8 @@ public class SnapshotReaderIT {
         if (completed.await(10, TimeUnit.SECONDS)) {
             // completed the snapshot ...
             Testing.print("completed the snapshot");
-        } else {
+        }
+        else {
             fail("failed to complete the snapshot within 10 seconds");
         }
     }
@@ -206,7 +231,6 @@ public class SnapshotReaderIT {
                 VerifyRecord.hasNoSourceQuery(record);
                 store.add(record);
                 schemaChanges.add(record);
-                System.out.println(record);
             });
         }
         // The last poll should always return null ...
@@ -278,7 +302,8 @@ public class SnapshotReaderIT {
         if (completed.await(10, TimeUnit.SECONDS)) {
             // completed the snapshot ...
             Testing.print("completed the snapshot");
-        } else {
+        }
+        else {
             fail("failed to complete the snapshot within 10 seconds");
         }
     }
@@ -381,7 +406,8 @@ public class SnapshotReaderIT {
         if (completed.await(10, TimeUnit.SECONDS)) {
             // completed the snapshot ...
             Testing.print("completed the snapshot");
-        } else {
+        }
+        else {
             fail("failed to complete the snapshot within 10 seconds");
         }
     }
@@ -454,15 +480,17 @@ public class SnapshotReaderIT {
         if (completed.await(10, TimeUnit.SECONDS)) {
             // completed the snapshot ...
             Testing.print("completed the snapshot");
-        } else {
+        }
+        else {
             fail("failed to complete the snapshot within 10 seconds");
         }
     }
 
     @Test
-    public void shouldSnapshotTablesInOrderSpecifiedInTablesWhitelist() throws Exception{
+    public void shouldSnapshotTablesInOrderSpecifiedInTablesWhitelist() throws Exception {
         config = simpleConfig()
-                .with(MySqlConnectorConfig.TABLE_WHITELIST, "connector_test_ro_(.*).orders,connector_test_ro_(.*).Products,connector_test_ro_(.*).products_on_hand,connector_test_ro_(.*).dbz_342_timetest")
+                .with(MySqlConnectorConfig.TABLE_WHITELIST,
+                        "connector_test_ro_(.*).orders,connector_test_ro_(.*).Products,connector_test_ro_(.*).products_on_hand,connector_test_ro_(.*).dbz_342_timetest")
                 .build();
         context = new MySqlTaskContext(config, new Filters.Builder(config).build());
         context.start();
@@ -478,15 +506,16 @@ public class SnapshotReaderIT {
         while ((records = reader.poll()) != null) {
             records.forEach(record -> {
                 VerifyRecord.isValid(record);
-                if (record.value() != null)
+                if (record.value() != null) {
                     tablesInOrder.add(getTableNameFromSourceRecord.apply(record));
+                }
             });
         }
         assertArrayEquals(tablesInOrder.toArray(), tablesInOrderExpected.toArray());
     }
 
     @Test
-    public void shouldSnapshotTablesInLexicographicalOrder() throws Exception{
+    public void shouldSnapshotTablesInLexicographicalOrder() throws Exception {
         config = simpleConfig()
                 .build();
         context = new MySqlTaskContext(config, new Filters.Builder(config).build());
@@ -497,7 +526,7 @@ public class SnapshotReaderIT {
         // Start the snapshot ...
         reader.start();
         // Poll for records ...
-        //        Testing.Print.enable();
+        // Testing.Print.enable();
         List<SourceRecord> records;
         LinkedHashSet<String> tablesInOrder = new LinkedHashSet<>();
         LinkedHashSet<String> tablesInOrderExpected = getTableNamesInSpecifiedOrder("Products", "customers", "dbz_342_timetest", "orders", "products_on_hand");
@@ -505,28 +534,31 @@ public class SnapshotReaderIT {
             records.forEach(record -> {
                 VerifyRecord.isValid(record);
                 VerifyRecord.hasNoSourceQuery(record);
-                if (record.value() != null)
+                if (record.value() != null) {
                     tablesInOrder.add(getTableNameFromSourceRecord.apply(record));
+                }
             });
         }
         assertArrayEquals(tablesInOrder.toArray(), tablesInOrderExpected.toArray());
     }
 
     private Function<SourceRecord, String> getTableNameFromSourceRecord = sourceRecord -> ((Struct) sourceRecord.value()).getStruct("source").getString("table");
-    private LinkedHashSet<String> getTableNamesInSpecifiedOrder(String ... tables){
+
+    private LinkedHashSet<String> getTableNamesInSpecifiedOrder(String... tables) {
         LinkedHashSet<String> tablesInOrderExpected = new LinkedHashSet<>();
-        for (String table : tables)
+        for (String table : tables) {
             tablesInOrderExpected.add(table);
+        }
         return tablesInOrderExpected;
     }
 
     @Test
     public void shouldCreateSnapshotSchemaOnly() throws Exception {
         config = simpleConfig()
-                    .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY)
-                    .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-                    .with(Heartbeat.HEARTBEAT_INTERVAL, 300_000)
-                    .build();
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.SCHEMA_ONLY)
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .with(Heartbeat.HEARTBEAT_INTERVAL, 300_000)
+                .build();
         context = new MySqlTaskContext(config, new Filters.Builder(config).build());
         context.start();
         reader = new SnapshotReader("snapshot", context);

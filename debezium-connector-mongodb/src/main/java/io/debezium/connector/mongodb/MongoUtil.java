@@ -57,13 +57,15 @@ public class MongoUtil {
      * @return the replica set name, or {@code null} if no replica set name is in the string
      */
     public static String replicaSetUsedIn(String addresses) {
-        if ( addresses.startsWith("[")) {
+        if (addresses.startsWith("[")) {
             // Just an IPv6 address, so no replica set name ...
             return null;
         }
         // Either a replica set name + an address, or just an IPv4 address ...
         int index = addresses.indexOf('/');
-        if (index < 0) return null;
+        if (index < 0) {
+            return null;
+        }
         return addresses.substring(0, index);
     }
 
@@ -150,8 +152,9 @@ public class MongoUtil {
                 while (cursor.hasNext()) {
                     try {
                         documentOperation.accept(cursor.next());
-                    } catch (InterruptedException e) {
-                        Thread.interrupted();
+                    }
+                    catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                         break;
                     }
                 }
@@ -180,7 +183,9 @@ public class MongoUtil {
     public static <T> boolean contains(MongoIterable<T> iterable, Predicate<T> matcher) {
         try (MongoCursor<T> cursor = iterable.iterator()) {
             while (cursor.hasNext()) {
-                if (matcher.test(cursor.next())) return true;
+                if (matcher.test(cursor.next())) {
+                    return true;
+                }
             }
         }
         return false;
@@ -249,36 +254,43 @@ public class MongoUtil {
                 if (address.startsWith("[")) {
                     // Definitely an IPv6 address without a replica set name ...
                     hostAndPort = address;
-                } else {
+                }
+                else {
                     // May start with replica set name ...
                     int index = address.indexOf("/[");
                     if (index >= 0) {
                         if ((index + 2) < address.length()) {
                             // replica set name with IPv6, so use just the IPv6 address ...
                             hostAndPort = address.substring(index + 1);
-                        } else {
+                        }
+                        else {
                             // replica set name with just opening bracket; this is invalid, so we'll ignore ...
                             continue;
                         }
-                    } else {
+                    }
+                    else {
                         // possible replica set name with IPv4 only
                         index = address.indexOf("/");
                         if (index >= 0) {
                             if ((index + 1) < address.length()) {
                                 // replica set name with IPv4, so use just the IPv4 address ...
                                 hostAndPort = address.substring(index + 1);
-                            } else {
+                            }
+                            else {
                                 // replica set name with no address ...
                                 hostAndPort = ServerAddress.defaultHost();
                             }
-                        } else {
+                        }
+                        else {
                             // No replica set name with IPv4, so use the whole address ...
                             hostAndPort = address;
                         }
                     }
                 }
                 ServerAddress newAddress = parseAddress(hostAndPort);
-                if (newAddress != null) addresses.add(newAddress);
+                if (newAddress != null) {
+                    addresses.add(newAddress);
+                }
             }
         }
         return addresses;

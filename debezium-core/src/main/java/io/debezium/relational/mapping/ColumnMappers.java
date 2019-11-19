@@ -51,7 +51,7 @@ public class ColumnMappers {
         config.forEachMatchingFieldNameWithInteger("column\\.mask\\.with\\.(\\d+)\\.chars", builder::maskStrings);
         config.forEachMatchingFieldName("column\\.propagate\\.source\\.type", builder::propagateSourceTypeToSchemaParameter);
 
-        return  builder.build();
+        return builder.build();
     }
 
     /**
@@ -88,7 +88,7 @@ public class ColumnMappers {
          * @return this object so that methods can be chained together; never null
          */
         public Builder map(String fullyQualifiedColumnNames, Class<ColumnMapper> mapperClass) {
-            return map(fullyQualifiedColumnNames,mapperClass,null);
+            return map(fullyQualifiedColumnNames, mapperClass, null);
         }
 
         /**
@@ -169,7 +169,7 @@ public class ColumnMappers {
          * @return this object so that methods can be chained together; never null
          */
         public Builder map(String fullyQualifiedColumnNames, String mapperClassName) {
-            return map(fullyQualifiedColumnNames,mapperClassName,null);
+            return map(fullyQualifiedColumnNames, mapperClassName, null);
         }
 
         /**
@@ -189,9 +189,11 @@ public class ColumnMappers {
             if (mapperClassName != null) {
                 try {
                     mapperClass = (Class<ColumnMapper>) getClass().getClassLoader().loadClass(mapperClassName);
-                } catch (ClassNotFoundException e) {
+                }
+                catch (ClassNotFoundException e) {
                     throw new ConnectException("Unable to find column mapper class " + mapperClassName + ": " + e.getMessage(), e);
-                } catch (ClassCastException e) {
+                }
+                catch (ClassCastException e) {
                     throw new ConnectException(
                             "Column mapper class must implement " + ColumnMapper.class + " but does not: " + e.getMessage(),
                             e);
@@ -236,7 +238,7 @@ public class ColumnMappers {
      * @return the mapping function, or null if there is no mapping function
      */
     public ValueConverter mappingConverterFor(TableId tableId, Column column) {
-        ColumnMapper mapper = mapperFor(tableId,column);
+        ColumnMapper mapper = mapperFor(tableId, column);
         return mapper != null ? mapper.create(column) : null;
     }
 
@@ -273,16 +275,19 @@ public class ColumnMappers {
 
     protected static ColumnMapper instantiateMapper(Class<ColumnMapper> clazz, Configuration config) {
         try {
-             ColumnMapper mapper = clazz.newInstance();
-             if ( config != null ) {
-                 mapper.initialize(config);
-             }
-             return mapper;
-        } catch (InstantiationException e) {
+            ColumnMapper mapper = clazz.newInstance();
+            if (config != null) {
+                mapper.initialize(config);
+            }
+            return mapper;
+        }
+        catch (InstantiationException e) {
             throw new ConnectException("Unable to instantiate column mapper class " + clazz.getName() + ": " + e.getMessage(), e);
-        } catch (IllegalAccessException e) {
+        }
+        catch (IllegalAccessException e) {
             throw new ConnectException("Unable to access column mapper class " + clazz.getName() + ": " + e.getMessage(), e);
-        } catch (Throwable e) {
+        }
+        catch (Throwable e) {
             throw new ConnectException("Unable to initialize the column mapper class " + clazz.getName() + ": " + e.getMessage(), e);
         }
     }

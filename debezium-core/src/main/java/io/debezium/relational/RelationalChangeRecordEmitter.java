@@ -8,6 +8,8 @@ package io.debezium.relational;
 import java.util.Objects;
 
 import org.apache.kafka.connect.data.Struct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.debezium.data.Envelope.Operation;
 import io.debezium.pipeline.spi.ChangeRecordEmitter;
@@ -22,6 +24,7 @@ import io.debezium.util.Clock;
  */
 public abstract class RelationalChangeRecordEmitter implements ChangeRecordEmitter {
 
+    protected final Logger logger = LoggerFactory.getLogger(getClass());
     private final OffsetContext offsetContext;
     private final Clock clock;
 
@@ -35,7 +38,7 @@ public abstract class RelationalChangeRecordEmitter implements ChangeRecordEmitt
         TableSchema tableSchema = (TableSchema) schema;
         Operation operation = getOperation();
 
-        switch(operation) {
+        switch (operation) {
             case CREATE:
                 emitCreateRecord(receiver, tableSchema);
                 break;
@@ -63,8 +66,12 @@ public abstract class RelationalChangeRecordEmitter implements ChangeRecordEmitt
         Object[] newColumnValues = getNewColumnValues();
         Object newKey = tableSchema.keyFromColumnData(newColumnValues);
         Struct newValue = tableSchema.valueFromColumnData(newColumnValues);
-        Struct envelope = tableSchema.getEnvelopeSchema().create(newValue, offsetContext.getSourceInfo(), clock.currentTimeInMillis());
+        Struct envelope = tableSchema.getEnvelopeSchema().create(newValue, offsetContext.getSourceInfo(), clock.currentTimeAsInstant());
 
+        if (skipEmptyMessages() && (newColumnValues == null || newColumnValues.length == 0)) {
+            logger.warn("no new values found for table '{}' from create message at '{}'; skipping record", tableSchema, offsetContext.getSourceInfo());
+            return;
+        }
         receiver.changeRecord(tableSchema, Operation.CREATE, newKey, envelope, offsetContext);
     }
 
@@ -73,7 +80,7 @@ public abstract class RelationalChangeRecordEmitter implements ChangeRecordEmitt
         Object[] newColumnValues = getNewColumnValues();
         Object newKey = tableSchema.keyFromColumnData(newColumnValues);
         Struct newValue = tableSchema.valueFromColumnData(newColumnValues);
-        Struct envelope = tableSchema.getEnvelopeSchema().read(newValue, offsetContext.getSourceInfo(), clock.currentTimeInMillis());
+        Struct envelope = tableSchema.getEnvelopeSchema().read(newValue, offsetContext.getSourceInfo(), clock.currentTimeAsInstant());
 
         receiver.changeRecord(tableSchema, Operation.READ, newKey, envelope, offsetContext);
     }
@@ -89,17 +96,22 @@ public abstract class RelationalChangeRecordEmitter implements ChangeRecordEmitt
         Struct newValue = tableSchema.valueFromColumnData(newColumnValues);
         Struct oldValue = tableSchema.valueFromColumnData(oldColumnValues);
 
-        // regular update
-        if (Objects.equals(oldKey, newKey)) {
-            Struct envelope = tableSchema.getEnvelopeSchema().update(oldValue, newValue, offsetContext.getSourceInfo(), clock.currentTimeInMillis());
+        if (skipEmptyMessages() && (newColumnValues == null || newColumnValues.length == 0)) {
+            logger.warn("no new values found for table '{}' from update message at '{}'; skipping record", tableSchema, offsetContext.getSourceInfo());
+            return;
+        }
+        // some configurations does not provide old values in case of updates
+        // in this case we handle all updates as regular ones
+        if (oldKey == null || Objects.equals(oldKey, newKey)) {
+            Struct envelope = tableSchema.getEnvelopeSchema().update(oldValue, newValue, offsetContext.getSourceInfo(), clock.currentTimeAsInstant());
             receiver.changeRecord(tableSchema, Operation.UPDATE, newKey, envelope, offsetContext);
         }
         // PK update -> emit as delete and re-insert with new key
         else {
-            Struct envelope = tableSchema.getEnvelopeSchema().delete(oldValue, offsetContext.getSourceInfo(), clock.currentTimeInMillis());
+            Struct envelope = tableSchema.getEnvelopeSchema().delete(oldValue, offsetContext.getSourceInfo(), clock.currentTimeAsInstant());
             receiver.changeRecord(tableSchema, Operation.DELETE, oldKey, envelope, offsetContext);
 
-            envelope = tableSchema.getEnvelopeSchema().create(newValue, offsetContext.getSourceInfo(), clock.currentTimeInMillis());
+            envelope = tableSchema.getEnvelopeSchema().create(newValue, offsetContext.getSourceInfo(), clock.currentTimeAsInstant());
             receiver.changeRecord(tableSchema, Operation.CREATE, newKey, envelope, offsetContext);
         }
     }
@@ -109,7 +121,12 @@ public abstract class RelationalChangeRecordEmitter implements ChangeRecordEmitt
         Object oldKey = tableSchema.keyFromColumnData(oldColumnValues);
         Struct oldValue = tableSchema.valueFromColumnData(oldColumnValues);
 
-        Struct envelope = tableSchema.getEnvelopeSchema().delete(oldValue, offsetContext.getSourceInfo(), clock.currentTimeInMillis());
+        if (skipEmptyMessages() && (oldColumnValues == null || oldColumnValues.length == 0)) {
+            logger.warn("no old values found for table '{}' from delete message at '{}'; skipping record", tableSchema, offsetContext.getSourceInfo());
+            return;
+        }
+
+        Struct envelope = tableSchema.getEnvelopeSchema().delete(oldValue, offsetContext.getSourceInfo(), clock.currentTimeAsInstant());
         receiver.changeRecord(tableSchema, Operation.DELETE, oldKey, envelope, offsetContext);
     }
 
@@ -127,4 +144,14 @@ public abstract class RelationalChangeRecordEmitter implements ChangeRecordEmitt
      * Returns the new row state in case of a CREATE or READ.
      */
     protected abstract Object[] getNewColumnValues();
+
+    /**
+     * Whether empty data messages should be ignored.
+     *
+     * @return true if empty data messages coming from data source should be ignored.</br>
+     * Typical use case are PostgreSQL changes without FULL replica identity.
+     */
+    protected boolean skipEmptyMessages() {
+        return false;
+    }
 }

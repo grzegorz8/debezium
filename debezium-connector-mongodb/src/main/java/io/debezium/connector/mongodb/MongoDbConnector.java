@@ -122,18 +122,19 @@ public class MongoDbConnector extends SourceConnector {
             monitorThread = new ReplicaSetMonitorThread(monitor::getReplicaSets, Duration.ofSeconds(connectionContext.pollPeriodInSeconds()),
                     Clock.SYSTEM, () -> taskContext.configureLoggingContext("disc"), this::replicaSetsChanged);
             replicaSetMonitorExecutor.execute(monitorThread);
-            logger.info("Successfully started MongoDB connector, and continuing to discover changes in replica sets", connectionContext.hosts());
-        } finally {
+            logger.info("Successfully started MongoDB connector, and continuing to discover changes in replica set(s) at {}", connectionContext.hosts());
+        }
+        finally {
             previousLogContext.restore();
         }
     }
 
     protected void replicaSetsChanged(ReplicaSets replicaSets) {
-        logger.info("Requesting task reconfiguration due to new/removed replica set(s) for MongoDB with seeds {}", connectionContext.hosts());
-        logger.info("New replica sets include:");
-        replicaSets.onEachReplicaSet(replicaSet -> {
-            logger.info("  {}", replicaSet);
-        });
+        if (logger.isInfoEnabled()) {
+            logger.info("Requesting task reconfiguration due to new/removed replica set(s) for MongoDB with seeds {}", connectionContext.hosts());
+            logger.info("New replica sets include:");
+            replicaSets.onEachReplicaSet(replicaSet -> logger.info("  {}", replicaSet));
+        }
         context.requestTaskReconfiguration();
     }
 
@@ -151,21 +152,22 @@ public class MongoDbConnector extends SourceConnector {
             ReplicaSets replicaSets = monitorThread.getReplicaSets(10, TimeUnit.SECONDS);
             if (replicaSets != null) {
                 logger.info("Subdividing {} MongoDB replica set(s) into at most {} task(s)",
-                            replicaSets.replicaSetCount(), maxTasks);
+                        replicaSets.replicaSetCount(), maxTasks);
                 replicaSets.subdivide(maxTasks, replicaSetsForTask -> {
                     // Create the configuration for each task ...
                     int taskId = taskConfigs.size();
                     logger.info("Configuring MongoDB connector task {} to capture events for replica set(s) at {}", taskId, replicaSetsForTask.hosts());
                     taskConfigs.add(config.edit()
-                                          .with(MongoDbConnectorConfig.HOSTS, replicaSetsForTask.hosts())
-                                          .with(MongoDbConnectorConfig.TASK_ID, taskId)
-                                          .build()
-                                          .asMap());
+                            .with(MongoDbConnectorConfig.HOSTS, replicaSetsForTask.hosts())
+                            .with(MongoDbConnectorConfig.TASK_ID, taskId)
+                            .build()
+                            .asMap());
                 });
             }
             logger.debug("Configuring {} MongoDB connector task(s)", taskConfigs.size());
             return taskConfigs;
-        } finally {
+        }
+        finally {
             previousLogContext.restore();
         }
     }
@@ -176,14 +178,22 @@ public class MongoDbConnector extends SourceConnector {
         try {
             logger.info("Stopping MongoDB connector");
             this.config = null;
-            if (replicaSetMonitorExecutor != null) replicaSetMonitorExecutor.shutdownNow();
+            if (replicaSetMonitorExecutor != null) {
+                replicaSetMonitorExecutor.shutdownNow();
+            }
             try {
-                if ( this.connectionContext != null ) this.connectionContext.shutdown();
-            } finally {
+                if (this.connectionContext != null) {
+                    this.connectionContext.shutdown();
+                }
+            }
+            finally {
                 logger.info("Stopped MongoDB connector");
             }
-        } finally {
-            if ( previousLogContext != null ) previousLogContext.restore();
+        }
+        finally {
+            if (previousLogContext != null) {
+                previousLogContext.restore();
+            }
         }
     }
 
@@ -210,10 +220,11 @@ public class MongoDbConnector extends SourceConnector {
                 && passwordValue.errorMessages().isEmpty()) {
             // Try to connect to the database ...
             try (ConnectionContext connContext = new ConnectionContext(config)) {
-                try ( MongoClient client = connContext.clientFor(connContext.hosts()) ) {
+                try (MongoClient client = connContext.clientFor(connContext.hosts())) {
                     client.listDatabaseNames();
                 }
-            } catch (MongoException e) {
+            }
+            catch (MongoException e) {
                 hostsValue.addErrorMessage("Unable to connect: " + e.getMessage());
             }
         }

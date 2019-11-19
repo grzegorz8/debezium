@@ -15,6 +15,7 @@
             - 3.2
             - 3.4
             - 4.0
+            - 4.2
     node: Slave
     properties:
       - build-discarder:
@@ -28,13 +29,13 @@
           description: "Repository from which Debezium is built"
       - string:
           name: BRANCH
-          default: master
+          default: "*/master"
           description: "A branch from which Debezium is built"
     scm:
       - git:
          url: $REPOSITORY
          branches:
-          - "*/$BRANCH"
+          - "$BRANCH"
     wrappers:
       - timeout:
           timeout: 45

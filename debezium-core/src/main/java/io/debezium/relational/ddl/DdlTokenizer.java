@@ -14,7 +14,7 @@ import io.debezium.text.TokenStream.Tokens;
 
 /**
  * A {@link Tokenizer} that is specialized for tokenizing DDL streams.
- * 
+ *
  * @author Randall Hauch
  * @author Horia Chiorean
  * @author Barry LaFond
@@ -81,7 +81,7 @@ public class DdlTokenizer implements Tokenizer {
     public static interface TokenTypeFunction {
         /**
          * Determine the type of the token.
-         * 
+         *
          * @param type the type of the token
          * @param token the token
          * @return the potentially modified token type
@@ -113,7 +113,7 @@ public class DdlTokenizer implements Tokenizer {
                            Tokens output) {
         return (position, startIndex, endIndex, type) -> {
             output.addToken(position, startIndex, endIndex,
-                            retypingFunction.typeOf(type, input.substring(startIndex, endIndex).toUpperCase()));
+                    retypingFunction.typeOf(type, input.substring(startIndex, endIndex).toUpperCase()));
         };
     }
 
@@ -150,8 +150,12 @@ public class DdlTokenizer implements Tokenizer {
                         }
                     }
                     endIndex = input.index(); // the token won't include the '\n' or '\r' character(s)
-                    if (!foundLineTerminator) ++endIndex; // must point beyond last char
-                    if (c == '\r' && input.isNext('\n')) input.next();
+                    if (!foundLineTerminator) {
+                        ++endIndex; // must point beyond last char
+                    }
+                    if (c == '\r' && input.isNext('\n')) {
+                        input.next();
+                    }
                     if (useComments) {
                         tokens.addToken(startPosition, startIndex, endIndex, COMMENT);
                     }
@@ -174,8 +178,12 @@ public class DdlTokenizer implements Tokenizer {
                             }
                         }
                         endIndex = input.index(); // the token won't include the '\n' or '\r' character(s)
-                        if (!foundLineTerminator) ++endIndex; // must point beyond last char
-                        if (c == '\r' && input.isNext('\n')) input.next();
+                        if (!foundLineTerminator) {
+                            ++endIndex; // must point beyond last char
+                        }
+                        if (c == '\r' && input.isNext('\n')) {
+                            input.next();
+                        }
 
                         // Check for PARSER_ID
 
@@ -183,7 +191,8 @@ public class DdlTokenizer implements Tokenizer {
                             tokens.addToken(startPosition, startIndex, endIndex, COMMENT);
                         }
 
-                    } else {
+                    }
+                    else {
                         // just a regular dash ...
                         tokens.addToken(startPosition, startIndex, startIndex + 1, SYMBOL);
                     }
@@ -221,7 +230,8 @@ public class DdlTokenizer implements Tokenizer {
                         c = input.next();
                         if ((c == '\\' || c == '"') && input.isNext('"')) {
                             c = input.next(); // consume the ' character since it is escaped
-                        } else if (c == '"') {
+                        }
+                        else if (c == '"') {
                             foundClosingQuote = true;
                             break;
                         }
@@ -232,17 +242,17 @@ public class DdlTokenizer implements Tokenizer {
                         throw new ParsingException(startingPosition, msg);
                     }
                     endIndex = input.index() + 1; // beyond last character read
-                    if ( removeQuotes && endIndex - startIndex > 1 ) {
+                    if (removeQuotes && endIndex - startIndex > 1) {
                         // At least one quoted character, so remove the quotes ...
                         startIndex += 1;
                         endIndex -= 1;
                     }
                     tokens.addToken(startingPosition, startIndex, endIndex, DOUBLE_QUOTED_STRING);
                     break;
-                case '`':       // back-quote character
+                case '`': // back-quote character
                 case '\u2018': // left single-quote character
                 case '\u2019': // right single-quote character
-                case '\'':     // single-quote character
+                case '\'': // single-quote character
                     char quoteChar = c;
                     startIndex = input.index();
                     startingPosition = input.position(startIndex);
@@ -251,7 +261,8 @@ public class DdlTokenizer implements Tokenizer {
                         c = input.next();
                         if ((c == '\\' || c == quoteChar) && input.isNext(quoteChar)) {
                             c = input.next(); // consume the character since it is escaped
-                        } else if (c == quoteChar) {
+                        }
+                        else if (c == quoteChar) {
                             foundClosingQuote = true;
                             break;
                         }
@@ -262,7 +273,7 @@ public class DdlTokenizer implements Tokenizer {
                         throw new ParsingException(startingPosition, msg);
                     }
                     endIndex = input.index() + 1; // beyond last character read
-                    if ( removeQuotes && endIndex - startIndex > 1 ) {
+                    if (removeQuotes && endIndex - startIndex > 1) {
                         // At least one quoted character, so remove the quotes ...
                         startIndex += 1;
                         endIndex -= 1;
@@ -283,26 +294,36 @@ public class DdlTokenizer implements Tokenizer {
                             }
                         }
                         endIndex = input.index(); // the token won't include the '\n' or '\r' character(s)
-                        if (!foundLineTerminator) ++endIndex; // must point beyond last char
-                        if (c == '\r' && input.isNext('\n')) input.next();
+                        if (!foundLineTerminator) {
+                            ++endIndex; // must point beyond last char
+                        }
+                        if (c == '\r' && input.isNext('\n')) {
+                            input.next();
+                        }
                         if (useComments) {
                             tokens.addToken(startingPosition, startIndex, endIndex, COMMENT);
                         }
 
-                    } else if (input.isNext('*')) {
+                    }
+                    else if (input.isNext('*')) {
                         // Multi-line comment ...
                         while (input.hasNext() && !input.isNext('*', '/')) {
                             c = input.next();
                         }
-                        if (input.hasNext()) input.next(); // consume the '*'
-                        if (input.hasNext()) input.next(); // consume the '/'
+                        if (input.hasNext()) {
+                            input.next(); // consume the '*'
+                        }
+                        if (input.hasNext()) {
+                            input.next(); // consume the '/'
+                        }
 
                         endIndex = input.index() + 1; // the token will include the '/' and '*' characters
                         if (useComments) {
                             tokens.addToken(startingPosition, startIndex, endIndex, COMMENT);
                         }
 
-                    } else {
+                    }
+                    else {
                         // just a regular slash ...
                         tokens.addToken(startingPosition, startIndex, startIndex + 1, SYMBOL);
                     }

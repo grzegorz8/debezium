@@ -16,6 +16,8 @@ import io.debezium.config.CommonConnectorConfig;
 import io.debezium.config.Configuration;
 import io.debezium.config.EnumeratedValue;
 import io.debezium.config.Field;
+import io.debezium.connector.AbstractSourceInfo;
+import io.debezium.connector.SourceInfoStructMaker;
 import io.debezium.document.Document;
 import io.debezium.function.Predicates;
 import io.debezium.heartbeat.Heartbeat;
@@ -24,6 +26,7 @@ import io.debezium.relational.ColumnId;
 import io.debezium.relational.HistorizedRelationalDatabaseConnectorConfig;
 import io.debezium.relational.RelationalDatabaseConnectorConfig;
 import io.debezium.relational.TableId;
+import io.debezium.relational.Tables.ColumnNameFilter;
 import io.debezium.relational.Tables.TableFilter;
 import io.debezium.relational.history.HistoryRecordComparator;
 import io.debezium.relational.history.KafkaDatabaseHistory;
@@ -34,6 +37,8 @@ import io.debezium.relational.history.KafkaDatabaseHistory;
  * @author Jiri Pechanec
  */
 public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnectorConfig {
+
+    protected static final int DEFAULT_PORT = 1433;
 
     /**
      * The set of predefined SnapshotMode options or aliases.
@@ -84,7 +89,9 @@ public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnec
             value = value.trim();
 
             for (SnapshotMode option : SnapshotMode.values()) {
-                if (option.getValue().equalsIgnoreCase(value)) return option;
+                if (option.getValue().equalsIgnoreCase(value)) {
+                    return option;
+                }
             }
 
             return null;
@@ -159,10 +166,14 @@ public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnec
          * @return the matching option, or null if no match is found
          */
         public static SnapshotIsolationMode parse(String value) {
-            if (value == null) return null;
+            if (value == null) {
+                return null;
+            }
             value = value.trim();
             for (SnapshotIsolationMode option : SnapshotIsolationMode.values()) {
-                if (option.getValue().equalsIgnoreCase(value)) return option;
+                if (option.getValue().equalsIgnoreCase(value)) {
+                    return option;
+                }
             }
             return null;
         }
@@ -176,22 +187,47 @@ public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnec
          */
         public static SnapshotIsolationMode parse(String value, String defaultValue) {
             SnapshotIsolationMode mode = parse(value);
-            if (mode == null && defaultValue != null) mode = parse(defaultValue);
+            if (mode == null && defaultValue != null) {
+                mode = parse(defaultValue);
+            }
             return mode;
         }
     }
 
-    public static final Field LOGICAL_NAME = Field.create("database.server.name")
-            .withDisplayName("Namespace")
+    public static final Field HOSTNAME = Field.create(DATABASE_CONFIG_PREFIX + JdbcConfiguration.HOSTNAME)
+            .withDisplayName("Hostname")
             .withType(Type.STRING)
             .withWidth(Width.MEDIUM)
             .withImportance(Importance.HIGH)
             .withValidation(Field::isRequired)
-            .withValidation(Field::isRequired, CommonConnectorConfig::validateServerNameIsDifferentFromHistoryTopicName)
-            .withDescription("Unique name that identifies the database server and all recorded offsets, and"
-                    + "that is used as a prefix for all schemas and topics. "
-                    + "Each distinct SQL Server installation should have a separate namespace and monitored by "
-                    + "at most one Debezium connector.");
+            .withDescription("Resolvable hostname or IP address of the SQL Server database server.");
+
+    public static final Field PORT = Field.create(DATABASE_CONFIG_PREFIX + JdbcConfiguration.PORT)
+            .withDisplayName("Port")
+            .withType(Type.INT)
+            .withWidth(Width.SHORT)
+            .withDefault(DEFAULT_PORT)
+            .withImportance(Importance.HIGH)
+            .withValidation(Field::isInteger)
+            .withDescription("Port of the SQL Server database server.");
+
+    public static final Field USER = Field.create(DATABASE_CONFIG_PREFIX + JdbcConfiguration.USER)
+            .withDisplayName("User")
+            .withType(Type.STRING)
+            .withWidth(Width.SHORT)
+            .withImportance(Importance.HIGH)
+            .withValidation(Field::isRequired)
+            .withDescription("Name of the SQL Server database user to be used when connecting to the database.");
+
+    public static final Field PASSWORD = Field.create(DATABASE_CONFIG_PREFIX + JdbcConfiguration.PASSWORD)
+            .withDisplayName("Password")
+            .withType(Type.PASSWORD)
+            .withWidth(Width.SHORT)
+            .withImportance(Importance.HIGH)
+            .withDescription("Password of the SQL Server database user to be used when connecting to the database.");
+
+    public static final Field SERVER_NAME = RelationalDatabaseConnectorConfig.SERVER_NAME
+            .withValidation(CommonConnectorConfig::validateServerNameIsDifferentFromHistoryTopicName);
 
     public static final Field DATABASE_NAME = Field.create(DATABASE_CONFIG_PREFIX + JdbcConfiguration.DATABASE)
             .withDisplayName("Database name")
@@ -218,45 +254,66 @@ public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnec
             .withWidth(Width.SHORT)
             .withImportance(Importance.LOW)
             .withDescription("Controls which transaction isolation level is used and how long the connector locks the monitored tables. "
-                    + "The default is '" + SnapshotIsolationMode.REPEATABLE_READ.getValue() + "', which means that repeatable read isolation level is used. In addition, exclusive locks are taken only during schema snapshot. "
-                    + "Using a value of '" + SnapshotIsolationMode.EXCLUSIVE.getValue() + "' ensures that the connector holds the exclusive lock (and thus prevents any reads and updates) for all monitored tables during the entire snapshot duration. "
-                    + "When '" + SnapshotIsolationMode.SNAPSHOT.getValue() + "' is specified, connector runs the initial snapshot in SNAPSHOT isolation level, which guarantees snapshot consistency. In addition, neither table nor row-level locks are held. "
-                    + "In '" + SnapshotIsolationMode.READ_UNCOMMITTED.getValue() + "' mode neither table nor row-level locks are acquired, but connector does not guarantee snapshot consistency.");
+                    + "The default is '" + SnapshotIsolationMode.REPEATABLE_READ.getValue()
+                    + "', which means that repeatable read isolation level is used. In addition, exclusive locks are taken only during schema snapshot. "
+                    + "Using a value of '" + SnapshotIsolationMode.EXCLUSIVE.getValue()
+                    + "' ensures that the connector holds the exclusive lock (and thus prevents any reads and updates) for all monitored tables during the entire snapshot duration. "
+                    + "When '" + SnapshotIsolationMode.SNAPSHOT.getValue()
+                    + "' is specified, connector runs the initial snapshot in SNAPSHOT isolation level, which guarantees snapshot consistency. In addition, neither table nor row-level locks are held. "
+                    + "In '" + SnapshotIsolationMode.READ_UNCOMMITTED.getValue()
+                    + "' mode neither table nor row-level locks are acquired, but connector does not guarantee snapshot consistency.");
 
     /**
      * The set of {@link Field}s defined as part of this configuration.
      */
     public static Field.Set ALL_FIELDS = Field.setOf(
-            LOGICAL_NAME,
+            SERVER_NAME,
             DATABASE_NAME,
+            HOSTNAME,
+            PORT,
+            USER,
+            PASSWORD,
             SNAPSHOT_MODE,
+            RelationalDatabaseConnectorConfig.SNAPSHOT_LOCK_TIMEOUT_MS,
+            RelationalDatabaseConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE,
             HistorizedRelationalDatabaseConnectorConfig.DATABASE_HISTORY,
             RelationalDatabaseConnectorConfig.TABLE_WHITELIST,
             RelationalDatabaseConnectorConfig.TABLE_BLACKLIST,
             RelationalDatabaseConnectorConfig.TABLE_IGNORE_BUILTIN,
             RelationalDatabaseConnectorConfig.COLUMN_BLACKLIST,
+            RelationalDatabaseConnectorConfig.MSG_KEY_COLUMNS,
+            RelationalDatabaseConnectorConfig.DECIMAL_HANDLING_MODE,
+            RelationalDatabaseConnectorConfig.TIME_PRECISION_MODE,
             CommonConnectorConfig.POLL_INTERVAL_MS,
             CommonConnectorConfig.MAX_BATCH_SIZE,
             CommonConnectorConfig.MAX_QUEUE_SIZE,
             CommonConnectorConfig.SNAPSHOT_DELAY_MS,
-            Heartbeat.HEARTBEAT_INTERVAL, Heartbeat.HEARTBEAT_TOPICS_PREFIX
-    );
+            CommonConnectorConfig.SNAPSHOT_FETCH_SIZE,
+            CommonConnectorConfig.TOMBSTONES_ON_DELETE,
+            Heartbeat.HEARTBEAT_INTERVAL, Heartbeat.HEARTBEAT_TOPICS_PREFIX,
+            CommonConnectorConfig.SOURCE_STRUCT_MAKER_VERSION);
 
     public static ConfigDef configDef() {
         ConfigDef config = new ConfigDef();
 
-        Field.group(config, "SQL Server", LOGICAL_NAME, DATABASE_NAME, SNAPSHOT_MODE);
+        Field.group(config, "SQL Server", SERVER_NAME, DATABASE_NAME, HOSTNAME, PORT,
+                USER, PASSWORD, SNAPSHOT_MODE);
         Field.group(config, "History Storage", KafkaDatabaseHistory.BOOTSTRAP_SERVERS,
                 KafkaDatabaseHistory.TOPIC, KafkaDatabaseHistory.RECOVERY_POLL_ATTEMPTS,
                 KafkaDatabaseHistory.RECOVERY_POLL_INTERVAL_MS, HistorizedRelationalDatabaseConnectorConfig.DATABASE_HISTORY);
         Field.group(config, "Events", RelationalDatabaseConnectorConfig.TABLE_WHITELIST,
                 RelationalDatabaseConnectorConfig.TABLE_BLACKLIST,
                 RelationalDatabaseConnectorConfig.COLUMN_BLACKLIST,
+                RelationalDatabaseConnectorConfig.MSG_KEY_COLUMNS,
+                RelationalDatabaseConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE,
                 RelationalDatabaseConnectorConfig.TABLE_IGNORE_BUILTIN,
-                Heartbeat.HEARTBEAT_INTERVAL, Heartbeat.HEARTBEAT_TOPICS_PREFIX
-        );
+                Heartbeat.HEARTBEAT_INTERVAL, Heartbeat.HEARTBEAT_TOPICS_PREFIX,
+                CommonConnectorConfig.SOURCE_STRUCT_MAKER_VERSION,
+                CommonConnectorConfig.TOMBSTONES_ON_DELETE);
         Field.group(config, "Connector", CommonConnectorConfig.POLL_INTERVAL_MS, CommonConnectorConfig.MAX_BATCH_SIZE,
-                CommonConnectorConfig.MAX_QUEUE_SIZE, CommonConnectorConfig.SNAPSHOT_DELAY_MS);
+                CommonConnectorConfig.MAX_QUEUE_SIZE, CommonConnectorConfig.SNAPSHOT_DELAY_MS, CommonConnectorConfig.SNAPSHOT_FETCH_SIZE,
+                RelationalDatabaseConnectorConfig.DECIMAL_HANDLING_MODE, RelationalDatabaseConnectorConfig.TIME_PRECISION_MODE,
+                RelationalDatabaseConnectorConfig.SNAPSHOT_LOCK_TIMEOUT_MS);
 
         return config;
     }
@@ -264,16 +321,28 @@ public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnec
     private final String databaseName;
     private final SnapshotMode snapshotMode;
     private final SnapshotIsolationMode snapshotIsolationMode;
-    private final Predicate<ColumnId> columnFilter;
+    private final ColumnNameFilter columnFilter;
 
     public SqlServerConnectorConfig(Configuration config) {
-        super(config, config.getString(LOGICAL_NAME), new SystemTablesPredicate(), x -> x.schema() + "." + x.table());
+        super(config, config.getString(SERVER_NAME), new SystemTablesPredicate(), x -> x.schema() + "." + x.table(), true);
 
         this.databaseName = config.getString(DATABASE_NAME);
         this.snapshotMode = SnapshotMode.parse(config.getString(SNAPSHOT_MODE), SNAPSHOT_MODE.defaultValueAsString());
         this.snapshotIsolationMode = SnapshotIsolationMode.parse(config.getString(SNAPSHOT_ISOLATION_MODE), SNAPSHOT_ISOLATION_MODE.defaultValueAsString());
-        this.columnFilter = Predicates.excludes(config.getString(RelationalDatabaseConnectorConfig.COLUMN_BLACKLIST),
-                columnId -> String.format("%s.%s.%s", columnId.schema(), columnId.table(), columnId.columnName()));
+        this.columnFilter = getColumnNameFilter(config.getString(RelationalDatabaseConnectorConfig.COLUMN_BLACKLIST));
+    }
+
+    private static ColumnNameFilter getColumnNameFilter(String excludedColumnPatterns) {
+        return new ColumnNameFilter() {
+
+            Predicate<ColumnId> delegate = Predicates.excludes(excludedColumnPatterns, ColumnId::toString);
+
+            @Override
+            public boolean matches(String catalogName, String schemaName, String tableName, String columnName) {
+                // ignore database name as it's not relevant here
+                return delegate.test(new ColumnId(new TableId(null, schemaName, tableName), columnName));
+            }
+        };
     }
 
     public String getDatabaseName() {
@@ -288,8 +357,18 @@ public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnec
         return snapshotMode;
     }
 
-    public Predicate<ColumnId> getColumnFilter() {
+    public ColumnNameFilter getColumnFilter() {
         return columnFilter;
+    }
+
+    @Override
+    protected SourceInfoStructMaker<? extends AbstractSourceInfo> getSourceInfoStructMaker(Version version) {
+        switch (version) {
+            case V1:
+                return new LegacyV1SqlServerSourceInfoStructMaker(Module.name(), Module.version(), this);
+            default:
+                return new SqlServerSourceInfoStructMaker(Module.name(), Module.version(), this);
+        }
     }
 
     private static class SystemTablesPredicate implements TableFilter {
@@ -299,7 +378,7 @@ public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnec
             return !(t.schema().toLowerCase().equals("cdc") ||
                     t.schema().toLowerCase().equals("sys") ||
                     t.table().toLowerCase().equals("systranschemas"));
-            }
+        }
     }
 
     @Override
@@ -312,4 +391,10 @@ public class SqlServerConnectorConfig extends HistorizedRelationalDatabaseConnec
             }
         };
     }
+
+    @Override
+    public String getContextName() {
+        return Module.contextName();
+    }
+
 }

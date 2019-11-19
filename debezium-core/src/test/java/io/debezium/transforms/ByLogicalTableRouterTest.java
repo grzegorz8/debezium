@@ -60,15 +60,14 @@ public class ByLogicalTableRouterTest {
         router.configure(props);
 
         Schema keySchema = SchemaBuilder.struct()
-            .name("mysql-server-1.inventory.customers_shard_1.Key")
-            .field("id", SchemaBuilder.int64().build())
-            .build();
+                .name("mysql-server-1.inventory.customers_shard_1.Key")
+                .field("id", SchemaBuilder.int64().build())
+                .build();
 
         Struct key1 = new Struct(keySchema).put("id", 123L);
 
         SourceRecord record1 = new SourceRecord(
-                new HashMap<>(), new HashMap<>(), "mysql-server-1.inventory.customers_shard_1", keySchema, key1, null, null
-        );
+                new HashMap<>(), new HashMap<>(), "mysql-server-1.inventory.customers_shard_1", keySchema, key1, null, null);
 
         SourceRecord transformed1 = router.apply(record1);
         assertThat(transformed1).isNotNull();
@@ -85,8 +84,7 @@ public class ByLogicalTableRouterTest {
         Struct key2 = new Struct(keySchema).put("id", 123L);
 
         SourceRecord record2 = new SourceRecord(
-                new HashMap<>(), new HashMap<>(), "mysql-server-1.inventory.customers_shard_2", keySchema, key2, null, null
-        );
+                new HashMap<>(), new HashMap<>(), "mysql-server-1.inventory.customers_shard_2", keySchema, key2, null, null);
 
         SourceRecord transformed2 = router.apply(record2);
         assertThat(transformed2).isNotNull();
@@ -103,8 +101,7 @@ public class ByLogicalTableRouterTest {
         Struct key3 = new Struct(keySchema).put("id", 456L);
 
         SourceRecord record3 = new SourceRecord(
-                new HashMap<>(), new HashMap<>(), "mysql-server-1.inventory.customers_shard_2", keySchema, key3, null, null
-        );
+                new HashMap<>(), new HashMap<>(), "mysql-server-1.inventory.customers_shard_2", keySchema, key3, null, null);
 
         SourceRecord transformed3 = router.apply(record3);
         assertThat(transformed3).isNotNull();
@@ -120,7 +117,7 @@ public class ByLogicalTableRouterTest {
     }
 
     @Test
-    public void testHeartbeatMessageTopicReplacementTopic(){
+    public void testHeartbeatMessageTopicReplacementTopic() {
         final ByLogicalTableRouter<SourceRecord> router = new ByLogicalTableRouter<>();
         final Map<String, String> props = new HashMap<>();
         final String keyFieldName = "serverName";
@@ -134,13 +131,12 @@ public class ByLogicalTableRouterTest {
 
         Schema keySchema = SchemaBuilder.struct()
                 .name("io.debezium.connector.mysql.ServerNameKey")
-                .field(keyFieldName,Schema.STRING_SCHEMA)
+                .field(keyFieldName, Schema.STRING_SCHEMA)
                 .build();
 
         Struct key1 = new Struct(keySchema).put(keyFieldName, "test_server_name_db");
         SourceRecord record1 = new SourceRecord(
-                new HashMap<>(), new HashMap<>(), "__debezium-heartbeat.test_server_name_db", keySchema, key1, null, null
-        );
+                new HashMap<>(), new HashMap<>(), "__debezium-heartbeat.test_server_name_db", keySchema, key1, null, null);
 
         SourceRecord transformed1 = router.apply(record1);
         assertThat(transformed1).isNotNull();
@@ -156,11 +152,9 @@ public class ByLogicalTableRouterTest {
 
         assertThat(transformed1.value()).isNull();
 
-
         Struct key2 = new Struct(keySchema).put(keyFieldName, "test_server_name_db_2");
         SourceRecord record2 = new SourceRecord(
-                new HashMap<>(), new HashMap<>(), "__debezium-heartbeat.test_server_name_db_2", keySchema, key2, null, null
-        );
+                new HashMap<>(), new HashMap<>(), "__debezium-heartbeat.test_server_name_db_2", keySchema, key2, null, null);
 
         SourceRecord transformed2 = router.apply(record2);
         assertThat(transformed2).isNotNull();
@@ -212,8 +206,7 @@ public class ByLogicalTableRouterTest {
         router.configure(props);
 
         SourceRecord record1 = new SourceRecord(
-                new HashMap<>(), new HashMap<>(), "mysql-server-1.inventory.customers_shard_1", null, null, null, null
-        );
+                new HashMap<>(), new HashMap<>(), "mysql-server-1.inventory.customers_shard_1", null, null, null, null);
 
         SourceRecord transformed1 = router.apply(record1);
         assertThat(transformed1).isNotNull();

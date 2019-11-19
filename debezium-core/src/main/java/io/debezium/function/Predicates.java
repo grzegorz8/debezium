@@ -75,7 +75,8 @@ public class Predicates {
         for (String literalOrPattern : LITERAL_SEPARATOR_PATTERN.split(literalsOrPatterns)) {
             if (isLiteral.test(literalOrPattern)) {
                 literals.add(literalOrPattern.toLowerCase());
-            } else {
+            }
+            else {
                 patterns.add(Pattern.compile(literalOrPattern, Pattern.CASE_INSENSITIVE));
             }
         }
@@ -207,7 +208,7 @@ public class Predicates {
      * in the supplied comma-separated list that matches the predicate parameter in a case-insensitive manner.
      *
      * @param regexPatterns the comma-separated regular expression pattern (or literal) strings; may not be null
-
+    
      * @return the function that performs the matching
      * @throws PatternSyntaxException if the string includes an invalid regular expression
      */
@@ -220,7 +221,9 @@ public class Predicates {
             String str = conversion.apply(t);
             if (str != null) {
                 for (Pattern p : patterns) {
-                    if (p.matcher(str).matches()) return Optional.of(p);
+                    if (p.matcher(str).matches()) {
+                        return Optional.of(p);
+                    }
                 }
             }
             return Optional.empty();
@@ -255,8 +258,8 @@ public class Predicates {
      * @param disallowed the predicate that defines the disallowed values; may be null
      * @return the predicate function; never null
      */
-    public static <T> Predicate<T> filter( Predicate<T> allowed, Predicate<T> disallowed ) {
-        return allowed != null ? allowed : (disallowed != null ? disallowed : (id)->true);
+    public static <T> Predicate<T> filter(Predicate<T> allowed, Predicate<T> disallowed) {
+        return allowed != null ? allowed : (disallowed != null ? disallowed : (id) -> true);
     }
 
     public static <R> Predicate<R> not(Predicate<R> predicate) {

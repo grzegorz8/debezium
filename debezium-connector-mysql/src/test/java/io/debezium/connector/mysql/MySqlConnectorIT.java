@@ -9,8 +9,10 @@ import static org.fest.assertions.Assertions.assertThat;
 import static org.junit.Assert.fail;
 
 import java.nio.file.Path;
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -22,6 +24,7 @@ import org.apache.kafka.common.config.Config;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
+import org.fest.assertions.Assertions;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -36,6 +39,8 @@ import io.debezium.doc.FixFor;
 import io.debezium.embedded.AbstractConnectorTest;
 import io.debezium.embedded.EmbeddedEngine.CompletionResult;
 import io.debezium.jdbc.JdbcConnection;
+import io.debezium.jdbc.TemporalPrecisionMode;
+import io.debezium.junit.logging.LogInterceptor;
 import io.debezium.relational.history.DatabaseHistory;
 import io.debezium.relational.history.FileDatabaseHistory;
 import io.debezium.relational.history.KafkaDatabaseHistory;
@@ -72,7 +77,8 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
     public void afterEach() {
         try {
             stopConnector();
-        } finally {
+        }
+        finally {
             Testing.Files.delete(DB_HISTORY_PATH);
         }
     }
@@ -83,11 +89,11 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
     @Test
     public void shouldNotStartWithInvalidConfiguration() {
         config = Configuration.create()
-                              .with(MySqlConnectorConfig.SERVER_NAME, "myserver")
-                              .with(KafkaDatabaseHistory.TOPIC, "myserver")
-                              .with(MySqlConnectorConfig.DATABASE_HISTORY, FileDatabaseHistory.class)
-                              .with(FileDatabaseHistory.FILE_PATH, DB_HISTORY_PATH)
-                              .build();
+                .with(MySqlConnectorConfig.SERVER_NAME, "myserver")
+                .with(KafkaDatabaseHistory.TOPIC, "myserver")
+                .with(MySqlConnectorConfig.DATABASE_HISTORY, FileDatabaseHistory.class)
+                .with(FileDatabaseHistory.FILE_PATH, DB_HISTORY_PATH)
+                .build();
 
         // we expect the engine will log at least one error, so preface it ...
         logger.info("Attempting to start the connector with an INVALID configuration, so MULTIPLE error messages and exceptions will appear in the log");
@@ -101,9 +107,9 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
     @Test
     public void shouldFailToValidateInvalidConfiguration() {
         Configuration config = Configuration.create()
-                                            .with(MySqlConnectorConfig.DATABASE_HISTORY, FileDatabaseHistory.class)
-                                            .with(FileDatabaseHistory.FILE_PATH, DB_HISTORY_PATH)
-                                            .build();
+                .with(MySqlConnectorConfig.DATABASE_HISTORY, FileDatabaseHistory.class)
+                .with(FileDatabaseHistory.FILE_PATH, DB_HISTORY_PATH)
+                .build();
         MySqlConnector connector = new MySqlConnector();
         Config result = connector.validate(config.asMap());
 
@@ -145,17 +151,17 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
     @Test
     public void shouldValidateValidConfigurationWithSSL() {
         Configuration config = DATABASE.defaultJdbcConfigBuilder()
-                                            .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.REQUIRED)
-                                            .with(MySqlConnectorConfig.SSL_KEYSTORE, "/some/path/to/keystore")
-                                            .with(MySqlConnectorConfig.SSL_KEYSTORE_PASSWORD, "keystore1234")
-                                            .with(MySqlConnectorConfig.SSL_TRUSTSTORE, "/some/path/to/truststore")
-                                            .with(MySqlConnectorConfig.SSL_TRUSTSTORE_PASSWORD, "truststore1234")
-                                            .with(MySqlConnectorConfig.SERVER_ID, 18765)
-                                            .with(MySqlConnectorConfig.SERVER_NAME, "myServer")
-                                            .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, "some.host.com")
-                                            .with(KafkaDatabaseHistory.TOPIC, "my.db.history.topic")
-                                            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-                                            .build();
+                .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.REQUIRED)
+                .with(MySqlConnectorConfig.SSL_KEYSTORE, "/some/path/to/keystore")
+                .with(MySqlConnectorConfig.SSL_KEYSTORE_PASSWORD, "keystore1234")
+                .with(MySqlConnectorConfig.SSL_TRUSTSTORE, "/some/path/to/truststore")
+                .with(MySqlConnectorConfig.SSL_TRUSTSTORE_PASSWORD, "truststore1234")
+                .with(MySqlConnectorConfig.SERVER_ID, 18765)
+                .with(MySqlConnectorConfig.SERVER_NAME, "myServer")
+                .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, "some.host.com")
+                .with(KafkaDatabaseHistory.TOPIC, "my.db.history.topic")
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .build();
         MySqlConnector connector = new MySqlConnector();
         Config result = connector.validate(config.asMap());
 
@@ -200,14 +206,14 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
     @Test
     public void shouldValidateAcceptableConfiguration() {
         Configuration config = DATABASE.defaultJdbcConfigBuilder()
-                                            .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
-                                            .with(MySqlConnectorConfig.SERVER_ID, 18765)
-                                            .with(MySqlConnectorConfig.SERVER_NAME, "myServer")
-                                            .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, "some.host.com")
-                                            .with(KafkaDatabaseHistory.TOPIC, "my.db.history.topic")
-                                            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-                                            .with(MySqlConnectorConfig.ON_CONNECT_STATEMENTS, "SET SESSION wait_timeout=2000")
-                                            .build();
+                .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
+                .with(MySqlConnectorConfig.SERVER_ID, 18765)
+                .with(MySqlConnectorConfig.SERVER_NAME, "myServer")
+                .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, "some.host.com")
+                .with(KafkaDatabaseHistory.TOPIC, "my.db.history.topic")
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .with(MySqlConnectorConfig.ON_CONNECT_STATEMENTS, "SET SESSION wait_timeout=2000")
+                .build();
         MySqlConnector connector = new MySqlConnector();
         Config result = connector.validate(config.asMap());
 
@@ -224,6 +230,7 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         assertNoConfigurationErrors(result, MySqlConnectorConfig.TABLE_WHITELIST);
         assertNoConfigurationErrors(result, MySqlConnectorConfig.TABLE_BLACKLIST);
         assertNoConfigurationErrors(result, MySqlConnectorConfig.COLUMN_BLACKLIST);
+        assertNoConfigurationErrors(result, MySqlConnectorConfig.MSG_KEY_COLUMNS);
         assertNoConfigurationErrors(result, MySqlConnectorConfig.CONNECTION_TIMEOUT_MS);
         assertNoConfigurationErrors(result, MySqlConnectorConfig.KEEP_ALIVE);
         assertNoConfigurationErrors(result, MySqlConnectorConfig.KEEP_ALIVE_INTERVAL_MS);
@@ -249,131 +256,6 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
     }
 
     /**
-     * Validates that if you use the deprecated snapshot.minimal.locking configuration value is set to true
-     * and its replacement snapshot.locking.mode is not explicitly defined, configuration validates as acceptable.
-     */
-    @Test
-    @FixFor("DBZ-602")
-    public void shouldValidateLockingModeWithMinimalLocksEnabledConfiguration() {
-        Configuration config = DATABASE.defaultJdbcConfigBuilder()
-            .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
-            .with(MySqlConnectorConfig.SERVER_ID, 18765)
-            .with(MySqlConnectorConfig.SERVER_NAME, "myServer")
-            .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, "some.host.com")
-            .with(KafkaDatabaseHistory.TOPIC, "my.db.history.topic")
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-            // Explicitly configure minimal locking enabled, but do not set snapshot.locking.mode
-            .with(MySqlConnectorConfig.SNAPSHOT_MINIMAL_LOCKING, true)
-            .build();
-
-        MySqlConnector connector = new MySqlConnector();
-        Config result = connector.validate(config.asMap());
-        assertNoConfigurationErrors(result, MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE);
-
-        assertThat(new MySqlConnectorConfig(config).getSnapshotLockingMode()).isEqualTo(SnapshotLockingMode.MINIMAL);
-    }
-
-    /**
-     * Validates that if you use the deprecated snapshot.minimal.locking configuration value is set to false
-     * and its replacement snapshot.locking.mode is not explicitly defined, configuration validates as acceptable.
-     */
-    @Test
-    @FixFor("DBZ-602")
-    public void shouldValidateLockingModeWithOutMinimalLocksEnabledConfiguration() {
-        Configuration config = DATABASE.defaultJdbcConfigBuilder()
-            .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
-            .with(MySqlConnectorConfig.SERVER_ID, 18765)
-            .with(MySqlConnectorConfig.SERVER_NAME, "myServer")
-            .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, "some.host.com")
-            .with(KafkaDatabaseHistory.TOPIC, "my.db.history.topic")
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-            // Explicitly configure minimal locking disabled, but do not set snapshot.locking.mode
-            .with(MySqlConnectorConfig.SNAPSHOT_MINIMAL_LOCKING, false)
-            .build();
-
-        MySqlConnector connector = new MySqlConnector();
-        Config result = connector.validate(config.asMap());
-        assertNoConfigurationErrors(result, MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE);
-
-        assertThat(new MySqlConnectorConfig(config).getSnapshotLockingMode()).isEqualTo(SnapshotLockingMode.EXTENDED);
-    }
-
-    /**
-     * Validates that if you use the deprecated snapshot.minimal.locking configuration value
-     * AND set its replacement snapshot.locking.mode an error will be generated.
-     */
-    @Test
-    @FixFor("DBZ-602")
-    public void shouldFailToValidateConflictingLockingModeConfiguration() {
-        Configuration config = DATABASE.defaultJdbcConfigBuilder()
-            .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
-            .with(MySqlConnectorConfig.SERVER_ID, 18765)
-            .with(MySqlConnectorConfig.SERVER_NAME, "myServer")
-            .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, "some.host.com")
-            .with(KafkaDatabaseHistory.TOPIC, "my.db.history.topic")
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-
-            // Conflicting properties under test:
-            .with(MySqlConnectorConfig.SNAPSHOT_MINIMAL_LOCKING, false)
-            .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, "none")
-            .build();
-
-        MySqlConnector connector = new MySqlConnector();
-        Config result = connector.validate(config.asMap());
-        assertConfigurationErrors(result, MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE);
-    }
-
-    /**
-     * Validates that if you use the deprecated snapshot.minimal.locking configuration value
-     * AND set its replacement snapshot.locking.mode an error will be generated.
-     */
-    @Test
-    @FixFor("DBZ-602")
-    public void shouldFailToValidateConflictingLockingModeExtendedConfiguration() {
-        Configuration config = DATABASE.defaultJdbcConfigBuilder()
-            .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
-            .with(MySqlConnectorConfig.SERVER_ID, 18765)
-            .with(MySqlConnectorConfig.SERVER_NAME, "myServer")
-            .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, "some.host.com")
-            .with(KafkaDatabaseHistory.TOPIC, "my.db.history.topic")
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-
-            // Conflicting properties under test:
-            .with(MySqlConnectorConfig.SNAPSHOT_MINIMAL_LOCKING, true)
-            .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, "extended")
-            .build();
-
-        MySqlConnector connector = new MySqlConnector();
-        Config result = connector.validate(config.asMap());
-        assertConfigurationErrors(result, MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE);
-    }
-
-    /**
-     * Validates that if you use the deprecated snapshot.minimal.locking configuration value
-     * AND set its replacement snapshot.locking.mode an error will be generated.
-     */
-    @Test
-    @FixFor("DBZ-602")
-    public void shouldFailToValidateConflictingLockingModeNoneConfiguration() {
-        Configuration config = DATABASE.defaultJdbcConfigBuilder()
-            .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
-            .with(MySqlConnectorConfig.SERVER_ID, 18765)
-            .with(MySqlConnectorConfig.SERVER_NAME, "myServer")
-            .with(KafkaDatabaseHistory.BOOTSTRAP_SERVERS, "some.host.com")
-            .with(KafkaDatabaseHistory.TOPIC, "my.db.history.topic")
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-
-            // Conflicting properties under test:
-            .with(MySqlConnectorConfig.SNAPSHOT_MINIMAL_LOCKING, true)
-            .with(MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE, "none")
-            .build();
-
-        MySqlConnector connector = new MySqlConnector();
-        Config result = connector.validate(config.asMap());
-        assertConfigurationErrors(result, MySqlConnectorConfig.SNAPSHOT_LOCKING_MODE);
-    }
-
-    /**
      * Validates that SNAPSHOT_LOCKING_MODE 'none' is valid with all snapshot modes
      */
     @Test
@@ -384,7 +266,7 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
                 .collect(Collectors.toList());
 
         // Loop over all known valid values
-        for (final String acceptableValue: acceptableValues) {
+        for (final String acceptableValue : acceptableValues) {
             Configuration config = DATABASE.defaultJdbcConfigBuilder()
                     .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
                     .with(MySqlConnectorConfig.SERVER_ID, 18765)
@@ -419,19 +301,19 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         // Use the DB configuration to define the connector's configuration to use the "replica"
         // which may be the same as the "master" ...
         config = Configuration.create()
-                              .with(MySqlConnectorConfig.HOSTNAME, System.getProperty("database.replica.hostname", "localhost"))
-                              .with(MySqlConnectorConfig.PORT, System.getProperty("database.replica.port", "3306"))
-                              .with(MySqlConnectorConfig.USER, "snapper")
-                              .with(MySqlConnectorConfig.PASSWORD, "snapperpass")
-                              .with(MySqlConnectorConfig.SERVER_ID, 18765)
-                              .with(MySqlConnectorConfig.SERVER_NAME, DATABASE.getServerName())
-                              .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
-                              .with(MySqlConnectorConfig.POLL_INTERVAL_MS, 10)
-                              .with(MySqlConnectorConfig.DATABASE_WHITELIST, DATABASE.getDatabaseName())
-                              .with(MySqlConnectorConfig.DATABASE_HISTORY, FileDatabaseHistory.class)
-                              .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-                              .with(FileDatabaseHistory.FILE_PATH, DB_HISTORY_PATH)
-                              .build();
+                .with(MySqlConnectorConfig.HOSTNAME, System.getProperty("database.replica.hostname", "localhost"))
+                .with(MySqlConnectorConfig.PORT, System.getProperty("database.replica.port", "3306"))
+                .with(MySqlConnectorConfig.USER, "snapper")
+                .with(MySqlConnectorConfig.PASSWORD, "snapperpass")
+                .with(MySqlConnectorConfig.SERVER_ID, 18765)
+                .with(MySqlConnectorConfig.SERVER_NAME, DATABASE.getServerName())
+                .with(MySqlConnectorConfig.SSL_MODE, SecureConnectionMode.DISABLED)
+                .with(MySqlConnectorConfig.POLL_INTERVAL_MS, 10)
+                .with(MySqlConnectorConfig.DATABASE_WHITELIST, DATABASE.getDatabaseName())
+                .with(MySqlConnectorConfig.DATABASE_HISTORY, FileDatabaseHistory.class)
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .with(FileDatabaseHistory.FILE_PATH, DB_HISTORY_PATH)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -463,8 +345,8 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         SourceRecord secondToLast = allRecords.get(allRecords.size() - 2);
         assertThat(secondToLast.sourceOffset().containsKey(SourceInfo.SNAPSHOT_KEY)).isTrue();
         assertThat(last.sourceOffset().containsKey(SourceInfo.SNAPSHOT_KEY)).isFalse(); // not snapshot
-        assertThat(((Struct) secondToLast.value()).getStruct(Envelope.FieldName.SOURCE).getBoolean(SourceInfo.SNAPSHOT_KEY)).isTrue();
-        assertThat(((Struct) last.value()).getStruct(Envelope.FieldName.SOURCE).getBoolean(SourceInfo.SNAPSHOT_KEY)).isTrue();
+        assertThat(((Struct) secondToLast.value()).getStruct(Envelope.FieldName.SOURCE).getString(SourceInfo.SNAPSHOT_KEY)).isEqualTo("true");
+        assertThat(((Struct) last.value()).getStruct(Envelope.FieldName.SOURCE).getString(SourceInfo.SNAPSHOT_KEY)).isEqualTo("last");
 
         // ---------------------------------------------------------------------------------------------------------------
         // Stopping the connector does not lose events recorded when connector is not running
@@ -481,11 +363,15 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         try (MySQLConnection db = MySQLConnection.forTestDatabase(DATABASE.getDatabaseName());) {
             try (JdbcConnection connection = db.connect()) {
                 connection.query("SELECT * FROM products", rs -> {
-                    if (Testing.Print.isEnabled()) connection.print(rs);
+                    if (Testing.Print.isEnabled()) {
+                        connection.print(rs);
+                    }
                 });
                 connection.execute("INSERT INTO products VALUES (default,'robot','Toy robot',1.304);");
                 connection.query("SELECT * FROM products", rs -> {
-                    if (Testing.Print.isEnabled()) connection.print(rs);
+                    if (Testing.Print.isEnabled()) {
+                        connection.print(rs);
+                    }
                 });
             }
         }
@@ -514,7 +400,9 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
             try (JdbcConnection connection = db.connect()) {
                 connection.execute("INSERT INTO products VALUES (1001,'roy','old robot',1234.56);");
                 connection.query("SELECT * FROM products", rs -> {
-                    if (Testing.Print.isEnabled()) connection.print(rs);
+                    if (Testing.Print.isEnabled()) {
+                        connection.print(rs);
+                    }
                 });
             }
         }
@@ -535,7 +423,9 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
             try (JdbcConnection connection = db.connect()) {
                 connection.execute("UPDATE products SET id=2001, description='really old robot' WHERE id=1001");
                 connection.query("SELECT * FROM products", rs -> {
-                    if (Testing.Print.isEnabled()) connection.print(rs);
+                    if (Testing.Print.isEnabled()) {
+                        connection.print(rs);
+                    }
                 });
             }
         }
@@ -556,7 +446,9 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
             try (JdbcConnection connection = db.connect()) {
                 connection.execute("UPDATE products SET weight=1345.67 WHERE id=2001");
                 connection.query("SELECT * FROM products", rs -> {
-                    if (Testing.Print.isEnabled()) connection.print(rs);
+                    if (Testing.Print.isEnabled()) {
+                        connection.print(rs);
+                    }
                 });
             }
         }
@@ -571,7 +463,7 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
 
         Testing.print("*** Done with simple update");
 
-        //Testing.Print.enable();
+        // Testing.Print.enable();
 
         // ---------------------------------------------------------------------------------------------------------------
         // Change our schema with a fully-qualified name; we should still see this event
@@ -584,7 +476,9 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
                         DATABASE.getDatabaseName()));
                 connection.execute("UPDATE products SET volume=13.5 WHERE id=2001");
                 connection.query("SELECT * FROM products", rs -> {
-                    if (Testing.Print.isEnabled()) connection.print(rs);
+                    if (Testing.Print.isEnabled()) {
+                        connection.print(rs);
+                    }
                 });
             }
         }
@@ -631,7 +525,9 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
             try (JdbcConnection connection = db.connect()) {
                 connection.execute("UPDATE products_on_hand SET quantity=20 WHERE product_id=109");
                 connection.query("SELECT * FROM products_on_hand", rs -> {
-                    if (Testing.Print.isEnabled()) connection.print(rs);
+                    if (Testing.Print.isEnabled()) {
+                        connection.print(rs);
+                    }
                 });
             }
         }
@@ -677,19 +573,23 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
                         + "(3002,'arthur','motorcycle',87.65,0.00,'arcycle'), "
                         + "(3003,'oak','tree',987.65,0.00,'oak');");
                 connection.query("SELECT * FROM products", rs -> {
-                    if (Testing.Print.isEnabled()) connection.print(rs);
+                    if (Testing.Print.isEnabled()) {
+                        connection.print(rs);
+                    }
                 });
                 connection.query("SHOW MASTER STATUS", positionAfterInserts::readFromDatabase);
                 // Change something else that is unrelated ...
                 connection.execute("UPDATE products_on_hand SET quantity=40 WHERE product_id=109");
                 connection.query("SELECT * FROM products_on_hand", rs -> {
-                    if (Testing.Print.isEnabled()) connection.print(rs);
+                    if (Testing.Print.isEnabled()) {
+                        connection.print(rs);
+                    }
                 });
                 connection.query("SHOW MASTER STATUS", positionAfterUpdate::readFromDatabase);
             }
         }
 
-        //Testing.Print.enable();
+        // Testing.Print.enable();
 
         // And consume the one insert ...
         records = consumeRecordsByTopic(2);
@@ -713,8 +613,9 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         stopConnector();
 
         // Read the last committed offsets, and verify the binlog coordinates ...
-        SourceInfo persistedOffsetSource = new SourceInfo();
-        persistedOffsetSource.setServerName(config.getString(MySqlConnectorConfig.SERVER_NAME));
+        SourceInfo persistedOffsetSource = new SourceInfo(new MySqlConnectorConfig(Configuration.create()
+                .with(MySqlConnectorConfig.SERVER_NAME, config.getString(MySqlConnectorConfig.SERVER_NAME))
+                .build()));
         Map<String, ?> lastCommittedOffset = readLastCommittedOffset(config, persistedOffsetSource.partition());
         persistedOffsetSource.setOffset(lastCommittedOffset);
         Testing.print("Position before inserts: " + positionBeforeInserts);
@@ -728,11 +629,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
             // Binlog position in offset should be more than before the inserts, but less than the position after the inserts ...
             assertThat(persistedOffsetSource.binlogPosition()).isGreaterThan(positionBeforeInserts.binlogPosition());
             assertThat(persistedOffsetSource.binlogPosition()).isLessThan(positionAfterInserts.binlogPosition());
-        } else {
+        }
+        else {
             // the replica is not the same server as the master, so it will have a different binlog filename and position ...
         }
-        // Last event is 'SHOW MASTER STATUS' which will reset the event number to 0 ...
-        assertThat(persistedOffsetSource.eventsToSkipUponRestart()).isEqualTo(0);
+        // Event number is 2 ...
+        assertThat(persistedOffsetSource.eventsToSkipUponRestart()).isEqualTo(2);
         // GTID set should match the before-inserts GTID set ...
         // assertThat(persistedOffsetSource.gtidSet()).isEqualTo(positionBeforeInserts.gtidSet());
 
@@ -754,19 +656,18 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         assertInsert(prod3003, "id", 3003);
 
         // Check that the offset has the correct/expected values ...
-        assertOffset(prod3003,"file",lastCommittedOffset.get("file"));
-        assertOffset(prod3003,"pos",lastCommittedOffset.get("pos"));
-        assertOffset(prod3003,"row",3);
-        assertOffset(prod3003,"event",lastCommittedOffset.get("event"));
+        assertOffset(prod3003, "file", lastCommittedOffset.get("file"));
+        assertOffset(prod3003, "pos", lastCommittedOffset.get("pos"));
+        assertOffset(prod3003, "row", 3);
+        assertOffset(prod3003, "event", lastCommittedOffset.get("event"));
 
         // Check that the record has all of the column values ...
-        assertValueField(prod3003,"after/id",3003);
-        assertValueField(prod3003,"after/name","oak");
-        assertValueField(prod3003,"after/description","tree");
-        assertValueField(prod3003,"after/weight",987.65d);
-        assertValueField(prod3003,"after/volume",0.0d);
-        assertValueField(prod3003,"after/alias","oak");
-
+        assertValueField(prod3003, "after/id", 3003);
+        assertValueField(prod3003, "after/name", "oak");
+        assertValueField(prod3003, "after/description", "tree");
+        assertValueField(prod3003, "after/weight", 987.65d);
+        assertValueField(prod3003, "after/volume", 0.0d);
+        assertValueField(prod3003, "after/alias", "oak");
 
         // And make sure we consume that one extra update ...
         records = consumeRecordsByTopic(1);
@@ -802,8 +703,10 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
                 .with(MySqlConnectorConfig.POLL_INTERVAL_MS, 10)
                 .with(MySqlConnectorConfig.DATABASE_WHITELIST, DATABASE.getDatabaseName())
                 .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.getDatabaseName() + ".products")
-                .with(MySqlConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE, DATABASE.getDatabaseName()+".products")
-                .with(MySqlConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE+"."+DATABASE.getDatabaseName()+".products", String.format("SELECT * from %s.products where id>=108 order by id", DATABASE.getDatabaseName()))
+                .with(MySqlConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE, DATABASE.getDatabaseName() + ".products")
+                .with(MySqlConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE + "." + DATABASE.getDatabaseName() + ".products",
+                        String.format("SELECT * from %s.products where id>=108 order by id", DATABASE.getDatabaseName()))
+                .with(DatabaseHistory.STORE_ONLY_MONITORED_TABLES_DDL, true)
                 .with(MySqlConnectorConfig.DATABASE_HISTORY, FileDatabaseHistory.class)
                 .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
                 .with(FileDatabaseHistory.FILE_PATH, DB_HISTORY_PATH)
@@ -817,13 +720,13 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         // ---------------------------------------------------------------------------------------------------------------
         // Consume all of the events due to startup and initialization of the database
         // ---------------------------------------------------------------------------------------------------------------
-        SourceRecords records = consumeRecordsByTopic(6+2); // 6 DDL and 2 insert records
+        SourceRecords records = consumeRecordsByTopic(6 + 2); // 6 DDL and 2 insert records
         assertThat(records.recordsForTopic(DATABASE.getServerName()).size()).isEqualTo(6);
         assertThat(records.recordsForTopic(DATABASE.topicForTable("products")).size()).isEqualTo(2);
 
-        //check that only the expected records are retrieved, in-order
-        assertThat( ((Struct) records.recordsForTopic(DATABASE.topicForTable("products")).get(0).key()).getInt32("id")).isEqualTo(108);
-        assertThat( ((Struct) records.recordsForTopic(DATABASE.topicForTable("products")).get(1).key()).getInt32("id")).isEqualTo(109);
+        // check that only the expected records are retrieved, in-order
+        assertThat(((Struct) records.recordsForTopic(DATABASE.topicForTable("products")).get(0).key()).getInt32("id")).isEqualTo(108);
+        assertThat(((Struct) records.recordsForTopic(DATABASE.topicForTable("products")).get(1).key()).getInt32("id")).isEqualTo(109);
 
         // Check that all records are valid, can be serialized and deserialized ...
         records.forEach(this::validate);
@@ -839,7 +742,7 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
             Thread.sleep(5000L);
         }
 
-        String tables=String.format("%s.products,%s.products_on_hand", DATABASE.getDatabaseName(), DATABASE.getDatabaseName());
+        String tables = String.format("%s.products,%s.products_on_hand", DATABASE.getDatabaseName(), DATABASE.getDatabaseName());
         config = Configuration.create()
                 .with(MySqlConnectorConfig.HOSTNAME, System.getProperty("database.replica.hostname", "localhost"))
                 .with(MySqlConnectorConfig.PORT, System.getProperty("database.replica.port", "3306"))
@@ -851,9 +754,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
                 .with(MySqlConnectorConfig.POLL_INTERVAL_MS, 10)
                 .with(MySqlConnectorConfig.DATABASE_WHITELIST, DATABASE.getDatabaseName())
                 .with(MySqlConnectorConfig.TABLE_WHITELIST, tables)
+                .with(DatabaseHistory.STORE_ONLY_MONITORED_TABLES_DDL, true)
                 .with(MySqlConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE, tables)
-                .with(MySqlConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE+"."+DATABASE.getDatabaseName()+".products", String.format("SELECT * from %s.products where id>=108 order by id", DATABASE.getDatabaseName()))
-                .with(MySqlConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE+"."+DATABASE.getDatabaseName()+".products_on_hand", String.format("SELECT * from %s.products_on_hand where product_id>=108 order by product_id", DATABASE.getDatabaseName()))
+                .with(MySqlConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE + "." + DATABASE.getDatabaseName() + ".products",
+                        String.format("SELECT * from %s.products where id>=108 order by id", DATABASE.getDatabaseName()))
+                .with(MySqlConnectorConfig.SNAPSHOT_SELECT_STATEMENT_OVERRIDES_BY_TABLE + "." + DATABASE.getDatabaseName() + ".products_on_hand",
+                        String.format("SELECT * from %s.products_on_hand where product_id>=108 order by product_id", DATABASE.getDatabaseName()))
                 .with(MySqlConnectorConfig.DATABASE_HISTORY, FileDatabaseHistory.class)
                 .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
                 .with(FileDatabaseHistory.FILE_PATH, DB_HISTORY_PATH)
@@ -867,16 +773,16 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         // ---------------------------------------------------------------------------------------------------------------
         // Consume all of the events due to startup and initialization of the database
         // ---------------------------------------------------------------------------------------------------------------
-        SourceRecords records = consumeRecordsByTopic(8+4); // 8 DDL and 4 insert records
+        SourceRecords records = consumeRecordsByTopic(8 + 4); // 8 DDL and 4 insert records
         assertThat(records.recordsForTopic(DATABASE.getServerName()).size()).isEqualTo(8);
         assertThat(records.recordsForTopic(DATABASE.topicForTable("products")).size()).isEqualTo(2);
         assertThat(records.recordsForTopic(DATABASE.topicForTable("products_on_hand")).size()).isEqualTo(2);
 
-        //check that only the expected records are retrieved, in-order
-        assertThat( ((Struct) records.recordsForTopic(DATABASE.topicForTable("products")).get(0).key()).getInt32("id")).isEqualTo(108);
-        assertThat( ((Struct) records.recordsForTopic(DATABASE.topicForTable("products")).get(1).key()).getInt32("id")).isEqualTo(109);
-        assertThat( ((Struct) records.recordsForTopic(DATABASE.topicForTable("products_on_hand")).get(0).key()).getInt32("product_id")).isEqualTo(108);
-        assertThat( ((Struct) records.recordsForTopic(DATABASE.topicForTable("products_on_hand")).get(1).key()).getInt32("product_id")).isEqualTo(109);
+        // check that only the expected records are retrieved, in-order
+        assertThat(((Struct) records.recordsForTopic(DATABASE.topicForTable("products")).get(0).key()).getInt32("id")).isEqualTo(108);
+        assertThat(((Struct) records.recordsForTopic(DATABASE.topicForTable("products")).get(1).key()).getInt32("id")).isEqualTo(109);
+        assertThat(((Struct) records.recordsForTopic(DATABASE.topicForTable("products_on_hand")).get(0).key()).getInt32("product_id")).isEqualTo(108);
+        assertThat(((Struct) records.recordsForTopic(DATABASE.topicForTable("products_on_hand")).get(1).key()).getInt32("product_id")).isEqualTo(109);
 
         // Check that all records are valid, can be serialized and deserialized ...
         records.forEach(this::validate);
@@ -889,19 +795,19 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
 
         final String tables = String.format("%s.customers", DATABASE.getDatabaseName(), DATABASE.getDatabaseName());
         config = DATABASE.defaultConfig()
-                              .with(MySqlConnectorConfig.TABLE_WHITELIST, tables)
-                              .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.SCHEMA_ONLY)
-                              .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-                              .with(DatabaseHistory.STORE_ONLY_MONITORED_TABLES_DDL, true)
-                              .build();
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, tables)
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.SCHEMA_ONLY)
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .with(DatabaseHistory.STORE_ONLY_MONITORED_TABLES_DDL, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
 
         // Consume the first records due to startup and initialization of the database ...
         // Testing.Print.enable();
-        SourceRecords records = consumeRecordsByTopic(2);
-        assertThat(records.ddlRecordsForDatabase(DATABASE.getDatabaseName()).size()).isEqualTo(2);
+        SourceRecords records = consumeRecordsByTopic(1 + 5);
+        assertThat(records.ddlRecordsForDatabase(DATABASE.getDatabaseName()).size()).isEqualTo(5);
 
         try (MySQLConnection db = MySQLConnection.forTestDatabase(DATABASE.getDatabaseName());) {
             try (JdbcConnection connection = db.connect()) {
@@ -920,24 +826,77 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
     }
 
     @Test
+    @FixFor("DBZ-1246")
+    public void shouldProcessCreateUniqueIndex() throws SQLException, InterruptedException {
+        Testing.Files.delete(DB_HISTORY_PATH);
+
+        final String tables = String.format("%s.migration_test", DATABASE.getDatabaseName(), DATABASE.getDatabaseName());
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, tables)
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.SCHEMA_ONLY)
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .build();
+
+        // Start the connector ...
+        start(MySqlConnector.class, config);
+
+        // Wait for streaming to start
+        // During the snapshot phase, 11 events in total should be generated
+        // 4 drop tables, 4 create tables
+        // 1 drop database, 1 create database, and 1 use database
+        //
+        // Prior to this being added, it was possible that the following code would create the migration_test
+        // table prior to the snapshot actually starting, which would mean that a drop and create table event
+        // would be emitted plus the create index, yielding 14 events total. But if snapshot started quicker
+        // then we could observe 13 events emitted since the migration_table creation and its index would
+        // only be seen by streaming phase.
+        //
+        // For consistency, this wait gurantees 11 events during snapshot and 2 during streaming.
+        waitForStreamingRunning(DATABASE.getServerName());
+
+        // Consume the first records due to startup and initialization of the database ...
+        // Testing.Print.enable();
+
+        try (MySQLConnection db = MySQLConnection.forTestDatabase(DATABASE.getDatabaseName());) {
+            try (JdbcConnection connection = db.connect()) {
+                connection.execute(
+                        "create table migration_test (id varchar(20) null,mgb_no varchar(20) null)",
+                        "create unique index migration_test_mgb_no_uindex on migration_test (mgb_no)",
+                        "insert into migration_test values(1,'2')");
+            }
+        }
+
+        SourceRecords records = consumeRecordsByTopic(16);
+        final List<SourceRecord> migrationTestRecords = records.recordsForTopic(DATABASE.topicForTable("migration_test"));
+        assertThat(migrationTestRecords.size()).isEqualTo(1);
+        final SourceRecord record = migrationTestRecords.get(0);
+        assertThat(((Struct) record.key()).getString("mgb_no")).isEqualTo("2");
+        assertThat(records.ddlRecordsForDatabase(DATABASE.getDatabaseName()).size()).isEqualTo(13);
+
+        stopConnector();
+    }
+
+    @Test
     @FixFor("DBZ-977")
     public void shouldIgnoreAlterTableForNonCapturedTablesStoredInHistory() throws SQLException, InterruptedException {
         Testing.Files.delete(DB_HISTORY_PATH);
 
         final String tables = String.format("%s.customers", DATABASE.getDatabaseName(), DATABASE.getDatabaseName());
         config = DATABASE.defaultConfig()
-                              .with(MySqlConnectorConfig.TABLE_WHITELIST, tables)
-                              .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.SCHEMA_ONLY)
-                              .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-                              .build();
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, tables)
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.SCHEMA_ONLY)
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .build();
+
+        dropDatabases();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
 
         // Consume the first records due to startup and initialization of the database ...
         // Testing.Print.enable();
-        SourceRecords records = consumeRecordsByTopic(6);
-        assertThat(records.ddlRecordsForDatabase(DATABASE.getDatabaseName()).size()).isEqualTo(5);
+        SourceRecords records = consumeRecordsByTopic(1 + 1 + 2 + 2 * 4);
+        assertThat(records.ddlRecordsForDatabase(DATABASE.getDatabaseName()).size()).isEqualTo(1 + 2 + 2 * 4);
 
         try (MySQLConnection db = MySQLConnection.forTestDatabase(DATABASE.getDatabaseName());) {
             try (JdbcConnection connection = db.connect()) {
@@ -955,6 +914,125 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         stopConnector();
     }
 
+    @Test
+    @FixFor("DBZ-1264")
+    public void shouldIgnoreCreateIndexForNonCapturedTablesNotStoredInHistory() throws SQLException, InterruptedException {
+        Testing.Files.delete(DB_HISTORY_PATH);
+
+        final String tables = String.format("%s.customers", DATABASE.getDatabaseName(), DATABASE.getDatabaseName());
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, tables)
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.SCHEMA_ONLY)
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .with(DatabaseHistory.STORE_ONLY_MONITORED_TABLES_DDL, true)
+                .build();
+
+        try (MySQLConnection db = MySQLConnection.forTestDatabase(DATABASE.getDatabaseName());) {
+            try (JdbcConnection connection = db.connect()) {
+                connection.execute(
+                        "CREATE TABLE nonmon (id INT)");
+            }
+        }
+        // Start the connector ...
+        start(MySqlConnector.class, config);
+
+        // Consume the first records due to startup and initialization of the database ...
+        // Testing.Print.enable();
+        SourceRecords records = consumeRecordsByTopic(6);
+        assertThat(records.ddlRecordsForDatabase(DATABASE.getDatabaseName()).size()).isEqualTo(5);
+
+        try (MySQLConnection db = MySQLConnection.forTestDatabase(DATABASE.getDatabaseName());) {
+            try (JdbcConnection connection = db.connect()) {
+                connection.execute(
+                        "CREATE UNIQUE INDEX pk ON nonmon(id)",
+                        "INSERT INTO customers VALUES (default,'name','surname','email');");
+            }
+        }
+
+        final SourceRecord record = consumeRecord();
+        Assertions.assertThat(record.topic()).isEqualTo(DATABASE.topicForTable("customers"));
+    }
+
+    @Test
+    @FixFor("DBZ-683")
+    public void shouldReceiveSchemaForNonWhitelistedTablesAndDatabases() throws SQLException, InterruptedException {
+        Testing.Files.delete(DB_HISTORY_PATH);
+
+        final String tables = String.format("%s.customers,%s.orders", DATABASE.getDatabaseName(), DATABASE.getDatabaseName());
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, tables)
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.SCHEMA_ONLY)
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .with(MySqlConnectorConfig.DATABASE_WHITELIST, ".*")
+                .build();
+
+        dropDatabases();
+
+        try (MySQLConnection db = MySQLConnection.forTestDatabase("mysql");) {
+            try (JdbcConnection connection = db.connect()) {
+                connection.execute(
+                        "CREATE DATABASE non_wh",
+                        "USE non_wh",
+                        "CREATE TABLE t1 (ID INT PRIMARY KEY)");
+            }
+        }
+
+        // Start the connector ...
+        start(MySqlConnector.class, config);
+
+        // Consume the first records due to startup and initialization of the database ...
+        // Testing.Print.enable();
+        // Two databases
+        // SET + USE + DROP DB + CREATE DB + 4 tables (2 whitelisted) (DROP + CREATE) TABLE
+        // USE + DROP DB + CREATE DB + (DROP + CREATE) TABLE
+        SourceRecords records = consumeRecordsByTopic(1 + 1 + 2 + 2 * 4 + 1 + 2 + 2);
+        // Records for one of the databases only
+        assertThat(records.ddlRecordsForDatabase(DATABASE.getDatabaseName()).size()).isEqualTo(1 + 2 + 2 * 4);
+        stopConnector();
+    }
+
+    @Test
+    @FixFor("DBZ-1546")
+    public void shouldHandleWhitelistedTables() throws SQLException, InterruptedException {
+        Testing.Files.delete(DB_HISTORY_PATH);
+
+        final String tables = String.format("%s.customers, %s.orders", DATABASE.getDatabaseName(), DATABASE.getDatabaseName());
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, tables)
+                .with(MySqlConnectorConfig.DATABASE_WHITELIST, ".*")
+                .build();
+
+        dropDatabases();
+
+        // Start the connector ...
+        start(MySqlConnector.class, config);
+
+        // Consume the first records due to startup and initialization of the database ...
+        // Testing.Print.enable();
+        // Two databases
+        // SET + USE + DROP DB + CREATE DB + 4 tables (2 whitelisted) (DROP + CREATE) TABLE
+        // USE + DROP DB + CREATE DB + (DROP + CREATE) TABLE
+        SourceRecords records = consumeRecordsByTopic(1 + 1 + 2 + 2 * 4 + 1 + 2 + 2);
+        // Records for one of the databases only
+        assertThat(records.ddlRecordsForDatabase(DATABASE.getDatabaseName()).size()).isEqualTo(1 + 2 + 2 * 4);
+        stopConnector();
+    }
+
+    private void dropDatabases() throws SQLException {
+        try (MySQLConnection db = MySQLConnection.forTestDatabase("mysql");) {
+            try (JdbcConnection connection = db.connect()) {
+                connection.query("SHOW DATABASES", rs -> {
+                    while (rs.next()) {
+                        final String dbName = rs.getString(1);
+                        if (!Filters.isBuiltInDatabase(dbName) && !dbName.equals(DATABASE.getDatabaseName())) {
+                            connection.execute("DROP DATABASE IF EXISTS " + dbName);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     protected static class BinlogPosition {
         private String binlogFilename;
         private long binlogPosition;
@@ -966,7 +1044,7 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
                 binlogPosition = rs.getLong(2);
                 if (rs.getMetaData().getColumnCount() > 4) {
                     // This column exists only in MySQL 5.6.5 or later ...
-                    gtidSet = rs.getString(5);// GTID set, may be null, blank, or contain a GTID set
+                    gtidSet = rs.getString(5); // GTID set, may be null, blank, or contain a GTID set
                 }
             }
         }
@@ -994,7 +1072,7 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
     }
 
     private Struct getAfter(SourceRecord record) {
-        return (Struct)((Struct)record.value()).get("after");
+        return (Struct) ((Struct) record.value()).get("after");
     }
 
     @Test
@@ -1003,9 +1081,9 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
 
         // Use the DB configuration to define the connector's configuration ...
         config = RO_DATABASE.defaultConfig()
-                              .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.NEVER)
-                              .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-                              .build();
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.NEVER)
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1022,7 +1100,8 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         assertThat(records.ddlRecordsForDatabase(RO_DATABASE.getDatabaseName()).size()).isEqualTo(6);
 
         // check float value
-        Optional<SourceRecord> recordWithScientfic = records.recordsForTopic(RO_DATABASE.topicForTable("Products")).stream().filter(x -> "hammer2".equals(getAfter(x).get("name"))).findFirst();
+        Optional<SourceRecord> recordWithScientfic = records.recordsForTopic(RO_DATABASE.topicForTable("Products")).stream()
+                .filter(x -> "hammer2".equals(getAfter(x).get("name"))).findFirst();
         assertThat(recordWithScientfic.isPresent());
         assertThat(getAfter(recordWithScientfic.get()).get("weight")).isEqualTo(0.875);
 
@@ -1047,10 +1126,10 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
 
         // Use the DB configuration to define the connector's configuration ...
         config = RO_DATABASE.defaultConfig()
-                              .with(MySqlConnectorConfig.COLUMN_BLACKLIST, RO_DATABASE.qualifiedTableName("orders") + ".order_number")
-                              .with(MySqlConnectorConfig.MASK_COLUMN(12), RO_DATABASE.qualifiedTableName("customers") + ".email")
-                              .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-                              .build();
+                .with(MySqlConnectorConfig.COLUMN_BLACKLIST, RO_DATABASE.qualifiedTableName("orders") + ".order_number")
+                .with(MySqlConnectorConfig.MASK_COLUMN(12), RO_DATABASE.qualifiedTableName("customers") + ".email")
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1077,7 +1156,8 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
             try {
                 value.get("order_number");
                 fail("The 'order_number' field was found but should not exist");
-            } catch (DataException e) {
+            }
+            catch (DataException e) {
                 // expected
             }
         });
@@ -1142,9 +1222,9 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
     @FixFor("DBZ-582")
     public void shouldEmitNoTombstoneOnDelete() throws Exception {
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.NEVER)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .build();
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.NEVER)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1183,6 +1263,46 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         stopConnector();
     }
 
+    @Test
+    @FixFor("DBZ-794")
+    public void shouldEmitNoSavepoints() throws Exception {
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.NEVER)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .build();
+
+        // Start the connector ...
+        start(MySqlConnector.class, config);
+
+        // ---------------------------------------------------------------------------------------------------------------
+        // Consume all of the events due to startup and initialization of the database
+        // ---------------------------------------------------------------------------------------------------------------
+        SourceRecords records = consumeRecordsByTopic(INITIAL_EVENT_COUNT); // 6 DDL changes
+        assertThat(records.recordsForTopic(DATABASE.topicForTable("orders")).size()).isEqualTo(5);
+
+        try (MySQLConnection db = MySQLConnection.forTestDatabase(DATABASE.getDatabaseName());) {
+            try (JdbcConnection connection = db.connect()) {
+                final Connection jdbc = connection.connection();
+                connection.setAutoCommit(false);
+                final Statement statement = jdbc.createStatement();
+                // connection.executeWithoutCommitting("SavePoint mysavep2");
+                statement.executeUpdate("DELETE FROM orders WHERE order_number = 10001");
+                statement.executeUpdate("SavePoint sp2");
+                statement.executeUpdate("DELETE FROM orders WHERE order_number = 10002");
+                jdbc.commit();
+            }
+        }
+
+        records = consumeRecordsByTopic(2);
+        assertThat(records.ddlRecordsForDatabase(DATABASE.getDatabaseName())).isNullOrEmpty();
+        final List<SourceRecord> deletes = records.recordsForTopic(DATABASE.topicForTable("orders"));
+
+        assertDelete(deletes.get(0), "order_number", 10001);
+        assertDelete(deletes.get(1), "order_number", 10002);
+
+        stopConnector();
+    }
+
     /**
      * This test case validates that if you disable MySQL option binlog_rows_query_log_events, then
      * the original SQL statement for an INSERT statement is NOT parsed into the resulting event.
@@ -1194,12 +1314,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         final String tableName = "products";
 
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
-            // Explicitly configure connector TO parse query
-            .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
-            .build();
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector TO parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1245,12 +1365,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         final String tableName = "products";
 
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
-            // Explicitly configure connector to NOT parse query
-            .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, false)
-            .build();
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector to NOT parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, false)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1297,12 +1417,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         final String tableName = "products";
 
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
-            // Explicitly configure connector TO parse query
-            .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
-            .build();
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector TO parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1349,12 +1469,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         final String tableName = "products";
 
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
-            // Explicitly configure connector TO parse query
-            .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
-            .build();
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector TO parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1412,12 +1532,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         final String tableName = "products";
 
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
-            // Explicitly configure connector TO parse query
-            .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
-            .build();
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector TO parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1473,12 +1593,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         final String tableName = "orders";
 
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
-            // Explicitly configure connector TO parse query
-            .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
-            .build();
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector TO parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1524,12 +1644,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         final String tableName = "orders";
 
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
-            // Explicitly configure connector TO parse query
-            .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
-            .build();
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector TO parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1583,12 +1703,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         final String tableName = "products";
 
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
-            // Explicitly configure connector TO parse query
-            .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
-            .build();
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector TO parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1634,12 +1754,12 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         final String tableName = "orders";
 
         config = DATABASE.defaultConfig()
-            .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
-            .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
-            .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
-            // Explicitly configure connector TO parse query
-            .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
-            .build();
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector TO parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
+                .build();
 
         // Start the connector ...
         start(MySqlConnector.class, config);
@@ -1680,6 +1800,134 @@ public class MySqlConnectorIT extends AbstractConnectorTest {
         validate(sourceRecord2);
         assertUpdate(sourceRecord2, "order_number", 10004);
         assertSourceQuery(sourceRecord2, updateSqlStatement);
+    }
+
+    /**
+     * Specifying the adaptive time.precision.mode is no longer valid and a configuration validation
+     * problem should be reported when that configuration option is used.
+     */
+    @Test
+    @FixFor("DBZ-1234")
+    public void shouldFailToValidateAdaptivePrecisionMode() throws InterruptedException {
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.NEVER)
+                .with(MySqlConnectorConfig.TIME_PRECISION_MODE, TemporalPrecisionMode.ADAPTIVE)
+                .build();
+
+        MySqlConnector connector = new MySqlConnector();
+        Config result = connector.validate(config.asMap());
+
+        assertConfigurationErrors(result, MySqlConnectorConfig.TIME_PRECISION_MODE);
+    }
+
+    @Test
+    @FixFor("DBZ-1242")
+    public void testEmptySchemaLogWarningWithDatabaseWhitelist() throws Exception {
+        final LogInterceptor logInterceptor = new LogInterceptor();
+
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .with(MySqlConnectorConfig.DATABASE_WHITELIST, "my_database")
+                .build();
+
+        start(MySqlConnector.class, config);
+
+        consumeRecordsByTopic(12);
+        waitForAvailableRecords(100, TimeUnit.MILLISECONDS);
+
+        stopConnector(value -> assertThat(logInterceptor.containsWarnMessage(NO_MONITORED_TABLES_WARNING)).isTrue());
+    }
+
+    @Test
+    @FixFor("DBZ-1242")
+    public void testNoEmptySchemaLogWarningWithDatabaseWhitelist() throws Exception {
+        final LogInterceptor logInterceptor = new LogInterceptor();
+
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL)
+                .build();
+
+        start(MySqlConnector.class, config);
+
+        consumeRecordsByTopic(12);
+        waitForAvailableRecords(100, TimeUnit.MILLISECONDS);
+
+        stopConnector(value -> assertThat(logInterceptor.containsWarnMessage(NO_MONITORED_TABLES_WARNING)).isFalse());
+    }
+
+    @Test
+    @FixFor("DBZ-1242")
+    public void testEmptySchemaWarningWithTableWhitelist() throws Exception {
+        // This captures all logged messages, allowing us to verify log message was written.
+        final LogInterceptor logInterceptor = new LogInterceptor();
+
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.INITIAL)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName("my_products"))
+                .build();
+
+        start(MySqlConnector.class, config);
+        assertConnectorIsRunning();
+
+        consumeRecordsByTopic(12);
+        waitForAvailableRecords(100, TimeUnit.MILLISECONDS);
+
+        stopConnector(value -> assertThat(logInterceptor.containsWarnMessage(NO_MONITORED_TABLES_WARNING)).isTrue());
+    }
+
+    @Test
+    @FixFor("DBZ-1242")
+    public void testNoEmptySchemaWarningWithTableWhitelist() throws Exception {
+        // This captures all logged messages, allowing us to verify log message was written.
+        final LogInterceptor logInterceptor = new LogInterceptor();
+
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.INITIAL)
+                .build();
+
+        start(MySqlConnector.class, config);
+        assertConnectorIsRunning();
+
+        consumeRecordsByTopic(12);
+        waitForAvailableRecords(100, TimeUnit.MILLISECONDS);
+
+        stopConnector(value -> assertThat(logInterceptor.containsWarnMessage(NO_MONITORED_TABLES_WARNING)).isFalse());
+    }
+
+    @Test
+    @FixFor("DBZ-1015")
+    public void shouldRewriteIdentityKey() throws InterruptedException, SQLException {
+        // Define the table we want to watch events from.
+        final String tableName = "products";
+
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.INCLUDE_SCHEMA_CHANGES, false)
+                .with(CommonConnectorConfig.TOMBSTONES_ON_DELETE, false)
+                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName(tableName))
+                // Explicitly configure connector TO parse query
+                .with(MySqlConnectorConfig.INCLUDE_SQL_QUERY, true)
+                // rewrite key from table 'products': from {id} to {id, name}
+                .with(MySqlConnectorConfig.MSG_KEY_COLUMNS, "(.*).products:id,name")
+                .build();
+
+        // Start the connector ...
+        start(MySqlConnector.class, config);
+
+        final SourceRecords records = consumeRecordsByTopic(9);
+        // Parse through the source record for the query value.
+        final List<SourceRecord> recordsForTopic = records.recordsForTopic(DATABASE.topicForTable(tableName));
+
+        recordsForTopic.forEach(record -> {
+            Struct key = (Struct) record.key();
+            Assertions.assertThat(key.get("id")).isNotNull();
+            Assertions.assertThat(key.get("name")).isNotNull();
+        });
+
+    }
+
+    private void waitForStreamingRunning(String serverName) throws InterruptedException {
+        waitForStreamingRunning("mysql", serverName, "binlog");
     }
 
     private List<SourceRecord> recordsForTopicForRoProductsTable(SourceRecords records) {

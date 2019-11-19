@@ -13,6 +13,7 @@ import static org.fest.assertions.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -21,14 +22,17 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
-import org.junit.After;
+import org.fest.assertions.Assertions;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestRule;
 
+import io.debezium.config.Configuration;
+import io.debezium.connector.postgresql.PostgresConnectorConfig.SnapshotMode;
 import io.debezium.connector.postgresql.junit.SkipTestDependingOnDatabaseVersionRule;
 import io.debezium.connector.postgresql.junit.SkipWhenDatabaseVersionLessThan;
 import io.debezium.data.Envelope;
@@ -37,9 +41,8 @@ import io.debezium.doc.FixFor;
 import io.debezium.heartbeat.Heartbeat;
 import io.debezium.jdbc.TemporalPrecisionMode;
 import io.debezium.relational.RelationalDatabaseConnectorConfig.DecimalHandlingMode;
-import io.debezium.relational.TableId;
-import io.debezium.schema.TopicSelector;
 import io.debezium.util.Collect;
+import io.debezium.util.Testing;
 
 /**
  * Integration test for {@link RecordsSnapshotProducerIT}
@@ -51,50 +54,29 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
     @Rule
     public final TestRule skip = new SkipTestDependingOnDatabaseVersionRule();
 
-    private RecordsSnapshotProducer snapshotProducer;
-    private PostgresTaskContext context;
-
     @Before
     public void before() throws Exception {
         TestHelper.dropAllSchemas();
         TestHelper.executeDDL("init_postgis.ddl");
         TestHelper.executeDDL("postgres_create_tables.ddl");
         TestHelper.executeDDL("postgis_create_tables.ddl");
-
-        PostgresConnectorConfig config = new PostgresConnectorConfig(TestHelper.defaultConfig()
-                .build());
-        TopicSelector<TableId> selector = PostgresTopicSelector.create(config);
-        context = new PostgresTaskContext(
-                config,
-                TestHelper.getSchema(config),
-                selector
-        );
-    }
-
-    @After
-    public void after() throws Exception {
-        if (snapshotProducer != null) {
-            snapshotProducer.stop();
-        }
     }
 
     @Test
     public void shouldGenerateSnapshotsForDefaultDatatypes() throws Exception {
-        snapshotProducer = new RecordsSnapshotProducer(context, new SourceInfo(TestHelper.TEST_SERVER, TestHelper.TEST_DATABASE), false);
-
-        TestConsumer consumer = testConsumer(ALL_STMTS.size(), "public", "Quoted__");
-
-        //insert data for each of different supported types
+        // insert data for each of different supported types
         String statementsBuilder = ALL_STMTS.stream().collect(Collectors.joining(";" + System.lineSeparator())) + ";";
         TestHelper.execute(statementsBuilder);
 
-        //then start the producer and validate all records are there
-        snapshotProducer.start(consumer, e -> {});
+        // then start the producer and validate all records are there
+        buildNoStreamProducer(TestHelper.defaultConfig());
+
+        TestConsumer consumer = testConsumer(ALL_STMTS.size(), "public", "Quoted__");
         consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
 
         Map<String, List<SchemaAndValueField>> expectedValuesByTopicName = super.schemaAndValuesByTopicName();
         consumer.process(record -> assertReadRecord(record, expectedValuesByTopicName));
-
+        Testing.Print.enable();
         // check the offset information for each record
         while (!consumer.isEmpty()) {
             SourceRecord record = consumer.remove();
@@ -105,25 +87,13 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
 
     @Test
     public void shouldGenerateSnapshotsForCustomDatatypes() throws Exception {
-        final PostgresConnectorConfig config = new PostgresConnectorConfig(
-                TestHelper.defaultConfig()
-                    .with(PostgresConnectorConfig.SNAPSHOT_MODE, PostgresConnectorConfig.SnapshotMode.INITIAL)
-                    .with(PostgresConnectorConfig.INCLUDE_UNKNOWN_DATATYPES, true)
-                    .build()
-        );
-        context = new PostgresTaskContext(
-                config,
-                TestHelper.getSchema(config),
-                PostgresTopicSelector.create(config)
-        );
-        snapshotProducer = new RecordsSnapshotProducer(context, new SourceInfo(TestHelper.TEST_SERVER, TestHelper.TEST_DATABASE), false);
-
-        final TestConsumer consumer = testConsumer(1, "public");
-
         TestHelper.execute(INSERT_CUSTOM_TYPES_STMT);
 
-        //then start the producer and validate all records are there
-        snapshotProducer.start(consumer, e -> {});
+        // then start the producer and validate all records are there
+        buildNoStreamProducer(TestHelper.defaultConfig()
+                .with(PostgresConnectorConfig.INCLUDE_UNKNOWN_DATATYPES, true));
+
+        final TestConsumer consumer = testConsumer(1, "public");
         consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
 
         final Map<String, List<SchemaAndValueField>> expectedValuesByTopicName = Collect.hashMapOf("public.custom_table", schemasAndValuesForCustomTypes());
@@ -136,64 +106,60 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
         TestHelper.dropAllSchemas();
         TestHelper.executeDDL("postgres_create_tables.ddl");
 
-        PostgresConnectorConfig config = new PostgresConnectorConfig(TestHelper.defaultConfig().build());
-        TopicSelector<TableId> selector = PostgresTopicSelector.create(config);
-        context = new PostgresTaskContext(
-                config,
-                TestHelper.getSchema(config),
-                selector
-        );
-
         String insertStmt = "INSERT INTO s1.a (aa) VALUES (1);" +
-                            "INSERT INTO s2.a (aa) VALUES (1);";
+                "INSERT INTO s2.a (aa) VALUES (1);";
 
         String statements = "CREATE SCHEMA s1; " +
-                            "CREATE SCHEMA s2; " +
-                            "CREATE TABLE s1.a (pk SERIAL, aa integer, PRIMARY KEY(pk));" +
-                            "CREATE TABLE s2.a (pk SERIAL, aa integer, PRIMARY KEY(pk));" +
-                            insertStmt;
+                "CREATE SCHEMA s2; " +
+                "CREATE TABLE s1.a (pk SERIAL, aa integer, PRIMARY KEY(pk));" +
+                "CREATE TABLE s2.a (pk SERIAL, aa integer, PRIMARY KEY(pk));" +
+                insertStmt;
         TestHelper.execute(statements);
 
-        snapshotProducer = new RecordsSnapshotProducer(context, new SourceInfo(TestHelper.TEST_SERVER, TestHelper.TEST_DATABASE), true);
+        buildWithStreamProducer(TestHelper.defaultConfig());
+
         TestConsumer consumer = testConsumer(2, "s1", "s2");
-        snapshotProducer.start(consumer, e -> {});
+        waitForSnapshotToBeCompleted();
 
         // first make sure we get the initial records from both schemas...
         consumer.await(TestHelper.waitTimeForRecords(), TimeUnit.SECONDS);
         consumer.clear();
 
         // then insert some more data and check that we get it back
+        waitForStreamingToStart();
         TestHelper.execute(insertStmt);
         consumer.expects(2);
-        consumer.await(TestHelper.waitTimeForRecords(), TimeUnit.SECONDS);
+        consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
 
         SourceRecord first = consumer.remove();
         VerifyRecord.isValidInsert(first, PK_FIELD, 2);
         assertEquals(topicName("s1.a"), first.topic());
         assertRecordOffsetAndSnapshotSource(first, false, false);
-        assertSourceInfo(first, "test_database", "s1", "a");
+        assertSourceInfo(first, TestHelper.TEST_DATABASE, "s1", "a");
 
         SourceRecord second = consumer.remove();
         VerifyRecord.isValidInsert(second, PK_FIELD, 2);
         assertEquals(topicName("s2.a"), second.topic());
         assertRecordOffsetAndSnapshotSource(second, false, false);
-        assertSourceInfo(second, "test_database", "s2", "a");
+        assertSourceInfo(second, TestHelper.TEST_DATABASE, "s2", "a");
 
         // now shut down the producers and insert some more records
-        snapshotProducer.stop();
+        stopConnector();
+        assertConnectorNotRunning();
         TestHelper.execute(insertStmt);
 
         // start a new producer back up, take a new snapshot (we expect all the records to be read back)
         int expectedRecordsCount = 6;
+        buildWithStreamProducer(TestHelper.defaultConfig());
+        waitForSnapshotToBeCompleted();
+
         consumer = testConsumer(expectedRecordsCount, "s1", "s2");
-        snapshotProducer = new RecordsSnapshotProducer(context, new SourceInfo(TestHelper.TEST_SERVER, TestHelper.TEST_DATABASE), true);
-        snapshotProducer.start(consumer, e -> {});
-        consumer.await(TestHelper.waitTimeForRecords(), TimeUnit.SECONDS);
+        consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
 
         AtomicInteger counter = new AtomicInteger(0);
         consumer.process(record -> {
             int counterVal = counter.getAndIncrement();
-            int expectedPk = (counterVal % 3) + 1; //each table has 3 entries keyed 1-3
+            int expectedPk = (counterVal % 3) + 1; // each table has 3 entries keyed 1-3
             VerifyRecord.isValidRead(record, PK_FIELD, expectedPk);
             assertRecordOffsetAndSnapshotSource(record, true, counterVal == (expectedRecordsCount - 1));
             assertSourceInfo(record);
@@ -201,19 +167,53 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
         consumer.clear();
 
         // now insert two more records and check that we only get those back from the stream
+        waitForStreamingToStart();
         TestHelper.execute(insertStmt);
         consumer.expects(2);
 
-        consumer.await(TestHelper.waitTimeForRecords(), TimeUnit.SECONDS);
+        consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
         first = consumer.remove();
         VerifyRecord.isValidInsert(first, PK_FIELD, 4);
         assertRecordOffsetAndSnapshotSource(first, false, false);
-        assertSourceInfo(first, "test_database", "s1", "a");
+        assertSourceInfo(first, TestHelper.TEST_DATABASE, "s1", "a");
 
         second = consumer.remove();
         VerifyRecord.isValidInsert(second, PK_FIELD, 4);
         assertRecordOffsetAndSnapshotSource(second, false, false);
-        assertSourceInfo(second, "test_database", "s2", "a");
+        assertSourceInfo(second, TestHelper.TEST_DATABASE, "s2", "a");
+    }
+
+    @Test
+    @FixFor("DBZ-1564")
+    public void shouldCloseTransactionsAfterSnapshot() throws Exception {
+        // PostGIS must not be used
+        TestHelper.dropAllSchemas();
+        TestHelper.executeDDL("postgres_create_tables.ddl");
+
+        String insertStmt = "INSERT INTO s1.a (aa) VALUES (1);" +
+                "INSERT INTO s2.a (aa) VALUES (1);";
+
+        String statements = "CREATE SCHEMA s1; " +
+                "CREATE SCHEMA s2; " +
+                "CREATE TABLE s1.a (pk SERIAL, aa integer, PRIMARY KEY(pk));" +
+                "CREATE TABLE s2.a (pk SERIAL, aa integer, PRIMARY KEY(pk));" +
+                insertStmt;
+        TestHelper.execute(statements);
+
+        buildWithStreamProducer(TestHelper.defaultConfig());
+
+        TestConsumer consumer = testConsumer(2, "s1", "s2");
+        waitForSnapshotToBeCompleted();
+
+        // first make sure we get the initial records from both schemas...
+        consumer.await(TestHelper.waitTimeForRecords(), TimeUnit.SECONDS);
+        consumer.clear();
+
+        waitForStreamingToStart();
+
+        TestHelper.noTransactionActive();
+
+        stopConnector();
     }
 
     @Test
@@ -223,23 +223,12 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
         TestHelper.dropAllSchemas();
         TestHelper.execute("CREATE TABLE t1 (pk SERIAL, aa integer, PRIMARY KEY(pk)); INSERT INTO t1 VALUES (default, 11)");
 
-        PostgresConnectorConfig config = new PostgresConnectorConfig(
-                TestHelper.defaultConfig()
-                    .with(PostgresConnectorConfig.SNAPSHOT_MODE, PostgresConnectorConfig.SnapshotMode.INITIAL)
-                    .with(PostgresConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
-                    .with(Heartbeat.HEARTBEAT_INTERVAL, 300_000)
-                    .build()
-        );
-        TopicSelector<TableId> selector = PostgresTopicSelector.create(config);
-        context = new PostgresTaskContext(
-                config,
-                TestHelper.getSchema(config),
-                selector
-        );
+        buildWithStreamProducer(TestHelper.defaultConfig()
+                .with(PostgresConnectorConfig.SNAPSHOT_MODE, PostgresConnectorConfig.SnapshotMode.INITIAL)
+                .with(PostgresConnectorConfig.INCLUDE_SCHEMA_CHANGES, true)
+                .with(Heartbeat.HEARTBEAT_INTERVAL, 300_000));
 
-        snapshotProducer = new RecordsSnapshotProducer(context, new SourceInfo(TestHelper.TEST_SERVER, TestHelper.TEST_DATABASE), true);
         TestConsumer consumer = testConsumer(2);
-        snapshotProducer.start(consumer, e -> {});
 
         // Make sure we get the table schema record and heartbeat record
         consumer.await(TestHelper.waitTimeForRecords(), TimeUnit.SECONDS);
@@ -247,13 +236,9 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
         final SourceRecord first = consumer.remove();
         VerifyRecord.isValidRead(first, PK_FIELD, 1);
         assertRecordOffsetAndSnapshotSource(first, true, true);
-        System.out.println(first);
         final SourceRecord second = consumer.remove();
         assertThat(second.topic()).startsWith("__debezium-heartbeat");
         assertRecordOffsetAndSnapshotSource(second, false, false);
-
-        // now shut down the producers and insert some more records
-        snapshotProducer.stop();
     }
 
     private void assertReadRecord(SourceRecord record, Map<String, List<SchemaAndValueField>> expectedValuesByTopicName) {
@@ -267,28 +252,15 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
     @Test
     @FixFor("DBZ-342")
     public void shouldGenerateSnapshotsForDefaultDatatypesAdaptiveMicroseconds() throws Exception {
-        PostgresConnectorConfig config = new PostgresConnectorConfig(
-                TestHelper.defaultConfig()
-                        .with(PostgresConnectorConfig.TIME_PRECISION_MODE, TemporalPrecisionMode.ADAPTIVE_TIME_MICROSECONDS)
-                        .build());
-
-        TopicSelector<TableId> selector = PostgresTopicSelector.create(config);
-        context = new PostgresTaskContext(
-                config,
-                TestHelper.getSchema(config),
-                selector
-        );
-
-        snapshotProducer = new RecordsSnapshotProducer(context, new SourceInfo(TestHelper.TEST_SERVER, TestHelper.TEST_DATABASE), false);
-
-        TestConsumer consumer = testConsumer(ALL_STMTS.size(), "public", "Quoted__");
-
-        //insert data for each of different supported types
+        // insert data for each of different supported types
         String statementsBuilder = ALL_STMTS.stream().collect(Collectors.joining(";" + System.lineSeparator())) + ";";
         TestHelper.execute(statementsBuilder);
 
-        //then start the producer and validate all records are there
-        snapshotProducer.start(consumer, e -> {});
+        // then start the producer and validate all records are there
+        buildNoStreamProducer(TestHelper.defaultConfig()
+                .with(PostgresConnectorConfig.TIME_PRECISION_MODE, TemporalPrecisionMode.ADAPTIVE_TIME_MICROSECONDS));
+
+        TestConsumer consumer = testConsumer(ALL_STMTS.size(), "public", "Quoted__");
         consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
 
         Map<String, List<SchemaAndValueField>> expectedValuesByTopicName = super.schemaAndValuesByTopicNameAdaptiveTimeMicroseconds();
@@ -309,27 +281,14 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
         TestHelper.dropAllSchemas();
         TestHelper.executeDDL("postgres_create_tables.ddl");
 
-        PostgresConnectorConfig config = new PostgresConnectorConfig(
-                TestHelper.defaultConfig()
-                        .with(PostgresConnectorConfig.DECIMAL_HANDLING_MODE, DecimalHandlingMode.STRING)
-                        .build());
-
-        TopicSelector<TableId> selector = PostgresTopicSelector.create(config);
-        context = new PostgresTaskContext(
-                config,
-                TestHelper.getSchema(config),
-                selector
-        );
-
-        snapshotProducer = new RecordsSnapshotProducer(context, new SourceInfo(TestHelper.TEST_SERVER, TestHelper.TEST_DATABASE), false);
-
-        TestConsumer consumer = testConsumer(1, "public", "Quoted_\"");
-
-        //insert data for each of different supported types
+        // insert data for each of different supported types
         TestHelper.execute(INSERT_NUMERIC_DECIMAL_TYPES_STMT);
 
-        //then start the producer and validate all records are there
-        snapshotProducer.start(consumer, e -> {});
+        // then start the producer and validate all records are there
+        buildNoStreamProducer(TestHelper.defaultConfig()
+                .with(PostgresConnectorConfig.DECIMAL_HANDLING_MODE, DecimalHandlingMode.STRING));
+
+        TestConsumer consumer = testConsumer(1, "public", "Quoted__");
         consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
 
         Map<String, List<SchemaAndValueField>> expectedValuesByTopicName = super.schemaAndValuesByTopicNameStringEncodedDecimals();
@@ -363,21 +322,6 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
 
         TestHelper.execute(ddl);
 
-        PostgresConnectorConfig config = new PostgresConnectorConfig(
-                TestHelper.defaultConfig()
-                        .build());
-
-        TopicSelector<TableId> selector = PostgresTopicSelector.create(config);
-        context = new PostgresTaskContext(
-                config,
-                TestHelper.getSchema(config),
-                selector
-        );
-
-        snapshotProducer = new RecordsSnapshotProducer(context, new SourceInfo(TestHelper.TEST_SERVER, TestHelper.TEST_DATABASE), false);
-
-        TestConsumer consumer = testConsumer(31);
-
         // add 1 record to `first_table`. To reproduce the bug we must process at
         // least one row before processing the partitioned table.
         TestHelper.execute("INSERT INTO first_table (pk, user_id) VALUES (1000, 1);");
@@ -391,7 +335,9 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
                 "FROM generate_series(1, 20);");
 
         // then start the producer and validate all records are there
-        snapshotProducer.start(consumer, e -> {});
+        buildNoStreamProducer(TestHelper.defaultConfig());
+
+        TestConsumer consumer = testConsumer(1 + 2 * 30); // Every record comes once from partitioned table and from partition
         consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
 
         Set<Integer> ids = new HashSet<>();
@@ -404,7 +350,11 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
 
         consumer.process(record -> {
             Struct key = (Struct) record.key();
-            ids.add(key.getInt32("pk"));
+            if (key != null) {
+                final Integer id = key.getInt32("pk");
+                Assertions.assertThat(ids).excludes(id);
+                ids.add(id);
+            }
             topicCounts.put(record.topic(), topicCounts.get(record.topic()) + 1);
         });
 
@@ -413,7 +363,7 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
 
         // verify each topic contains exactly the number of input records
         assertEquals(1, topicCounts.get("test_server.public.first_table").intValue());
-        assertEquals(0, topicCounts.get("test_server.public.partitioned").intValue());
+        assertEquals(30, topicCounts.get("test_server.public.partitioned").intValue());
         assertEquals(10, topicCounts.get("test_server.public.partitioned_1_100").intValue());
         assertEquals(20, topicCounts.get("test_server.public.partitioned_101_200").intValue());
 
@@ -423,5 +373,128 @@ public class RecordsSnapshotProducerIT extends AbstractRecordsProducerTest {
             assertRecordOffsetAndSnapshotSource(record, true, consumer.isEmpty());
             assertSourceInfo(record);
         }
+    }
+
+    @Test
+    @FixFor("DBZ-1162")
+    public void shouldGenerateSnapshotsForHstores() throws Exception {
+        // PostGIS must not be used
+        TestHelper.dropAllSchemas();
+        TestHelper.executeDDL("postgres_create_tables.ddl");
+
+        // insert data for each of different supported types
+        TestHelper.execute(INSERT_HSTORE_TYPE_STMT);
+
+        // then start the producer and validate all records are there
+        buildNoStreamProducer(TestHelper.defaultConfig());
+
+        TestConsumer consumer = testConsumer(1, "public", "Quoted__");
+        consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
+
+        final Map<String, List<SchemaAndValueField>> expectedValuesByTopicName = Collect.hashMapOf("public.hstore_table", schemaAndValueFieldForJsonEncodedHStoreType());
+
+        consumer.process(record -> assertReadRecord(record, expectedValuesByTopicName));
+    }
+
+    @Test
+    @FixFor("DBZ-1163")
+    public void shouldGenerateSnapshotForATableWithoutPrimaryKey() throws Exception {
+        TestHelper.execute("insert into table_without_pk values(1, 1000)");
+
+        // then start the producer and validate all records are there
+        buildNoStreamProducer(TestHelper.defaultConfig());
+
+        TestConsumer consumer = testConsumer(1, "public", "Quoted__");
+        consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
+
+        List<SchemaAndValueField> schemaAndValueFields = Arrays.asList(
+                new SchemaAndValueField("id", Schema.INT32_SCHEMA, 1),
+                new SchemaAndValueField("val", Schema.OPTIONAL_INT32_SCHEMA, 1000));
+
+        consumer.process(record -> {
+            assertThat(record.key()).isNull();
+            String actualTopicName = record.topic().replace(TestHelper.TEST_SERVER + ".", "");
+            assertEquals("public.table_without_pk", actualTopicName);
+            assertRecordSchemaAndValues(schemaAndValueFields, record, Envelope.FieldName.AFTER);
+        });
+    }
+
+    @Test
+    // MACADDR8 Postgres type is only supported since Postgres version 10
+    @SkipWhenDatabaseVersionLessThan(POSTGRES_10)
+    @FixFor("DBZ-1193")
+    public void shouldGenerateSnapshotForMacaddr8Datatype() throws Exception {
+        TestHelper.dropAllSchemas();
+        TestHelper.execute("CREATE TABLE macaddr8_table(pk SERIAL, m MACADDR8, PRIMARY KEY(pk));");
+
+        // insert macaddr8 data
+        TestHelper.execute(INSERT_MACADDR8_TYPE_STMT);
+
+        // then start the producer and validate the record are there
+        buildNoStreamProducer(TestHelper.defaultConfig());
+
+        TestConsumer consumer = testConsumer(1, "public");
+        consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
+
+        final Map<String, List<SchemaAndValueField>> expectedValueByTopicName = Collect.hashMapOf("public.macaddr8_table", schemaAndValueForMacaddr8Type());
+
+        consumer.process(record -> assertReadRecord(record, expectedValueByTopicName));
+    }
+
+    @Test
+    @FixFor("DBZ-1164")
+    public void shouldGenerateSnapshotForTwentyFourHourTime() throws Exception {
+        TestHelper.dropAllSchemas();
+        TestHelper.executeDDL("postgres_create_tables.ddl");
+
+        // insert data and time data
+        TestHelper.execute(INSERT_DATE_TIME_TYPES_STMT);
+
+        buildNoStreamProducer(TestHelper.defaultConfig());
+
+        TestConsumer consumer = testConsumer(1, "public");
+        consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
+
+        final Map<String, List<SchemaAndValueField>> expectedValueByTopicName = Collect.hashMapOf("public.time_table", schemaAndValuesForDateTimeTypes());
+
+        consumer.process(record -> assertReadRecord(record, expectedValueByTopicName));
+    }
+
+    @Test
+    @FixFor("DBZ-1345")
+    public void shouldNotSnapshotMaterializedViews() throws Exception {
+        TestHelper.dropAllSchemas();
+        TestHelper.execute("CREATE TABLE mv_real_table (pk SERIAL, i integer, s VARCHAR(50), PRIMARY KEY(pk));");
+        TestHelper.execute("CREATE MATERIALIZED VIEW mv (pk, s) AS SELECT mrv.pk, mrv.s FROM mv_real_table mrv WITH DATA;");
+
+        // insert data
+        TestHelper.execute("INSERT INTO mv_real_table (i,s) VALUES (1,'1');");
+        TestHelper.execute("REFRESH MATERIALIZED VIEW mv WITH DATA;");
+
+        buildNoStreamProducer(TestHelper.defaultConfig());
+
+        TestConsumer consumer = testConsumer(1, "public");
+        consumer.await(TestHelper.waitTimeForRecords() * 30, TimeUnit.SECONDS);
+
+        final Map<String, List<SchemaAndValueField>> expectedValueByTopicName = Collect.hashMapOf("public.mv_real_table", schemaAndValueForMaterializedViewBaseType());
+        consumer.process(record -> assertReadRecord(record, expectedValueByTopicName));
+    }
+
+    private void buildNoStreamProducer(Configuration.Builder config) {
+        start(PostgresConnector.class, config
+                .with(PostgresConnectorConfig.SNAPSHOT_MODE, SnapshotMode.INITIAL_ONLY)
+                .with(PostgresConnectorConfig.SNAPSHOT_MODE_CLASS, CustomTestSnapshot.class.getName())
+                .with(PostgresConnectorConfig.DROP_SLOT_ON_STOP, Boolean.FALSE)
+                .build());
+        assertConnectorIsRunning();
+    }
+
+    private void buildWithStreamProducer(Configuration.Builder config) {
+        start(PostgresConnector.class, config
+                .with(PostgresConnectorConfig.SNAPSHOT_MODE, SnapshotMode.ALWAYS)
+                .with(PostgresConnectorConfig.SNAPSHOT_MODE_CLASS, CustomTestSnapshot.class.getName())
+                .with(PostgresConnectorConfig.DROP_SLOT_ON_STOP, Boolean.FALSE)
+                .build());
+        assertConnectorIsRunning();
     }
 }

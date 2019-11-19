@@ -46,17 +46,18 @@ public class SqlServerConnection extends JdbcConnection {
 
     private static final String STATEMENTS_PLACEHOLDER = "#";
     private static final String GET_MAX_LSN = "SELECT sys.fn_cdc_get_max_lsn()";
-    private static final String LOCK_TABLE = "SELECT * FROM # WITH (TABLOCKX)";
+    private static final String LOCK_TABLE = "SELECT * FROM [#] WITH (TABLOCKX)";
     private static final String LSN_TO_TIMESTAMP = "SELECT sys.fn_cdc_map_lsn_to_time(?)";
     private static final String INCREMENT_LSN = "SELECT sys.fn_cdc_increment_lsn(?)";
-    private static final String GET_ALL_CHANGES_FOR_TABLE = "SELECT * FROM cdc.fn_cdc_get_all_changes_#(ISNULL(?,sys.fn_cdc_get_min_lsn('#')), ?, N'all update old')";
+    private static final String GET_ALL_CHANGES_FOR_TABLE = "SELECT * FROM cdc.[fn_cdc_get_all_changes_#](ISNULL(?,sys.fn_cdc_get_min_lsn('#')), ?, N'all update old')";
     private static final String GET_LIST_OF_CDC_ENABLED_TABLES = "EXEC sys.sp_cdc_help_change_data_capture";
     private static final String GET_LIST_OF_NEW_CDC_ENABLED_TABLES = "SELECT * FROM cdc.change_tables WHERE start_lsn BETWEEN ? AND ?";
     private static final String GET_LIST_OF_KEY_COLUMNS = "SELECT * FROM cdc.index_columns WHERE object_id=?";
 
     private static final int CHANGE_TABLE_DATA_COLUMN_OFFSET = 5;
 
-    private static final String URL_PATTERN = "jdbc:sqlserver://${" + JdbcConfiguration.HOSTNAME + "}:${" + JdbcConfiguration.PORT + "};databaseName=${" + JdbcConfiguration.DATABASE + "}";
+    private static final String URL_PATTERN = "jdbc:sqlserver://${" + JdbcConfiguration.HOSTNAME + "}:${" + JdbcConfiguration.PORT + "};databaseName=${"
+            + JdbcConfiguration.DATABASE + "}";
     private static final ConnectionFactory FACTORY = JdbcConnection.patternBasedFactory(URL_PATTERN,
             SQLServerDriver.class.getName(),
             SqlServerConnection.class.getClassLoader());
@@ -66,7 +67,7 @@ public class SqlServerConnection extends JdbcConnection {
      */
     private final String realDatabaseName;
 
-    private static interface ResultSetExtractor<T> {
+    public static interface ResultSetExtractor<T> {
         T apply(ResultSet rs) throws SQLException;
     }
 
@@ -121,12 +122,13 @@ public class SqlServerConnection extends JdbcConnection {
      * @param consumer - the change processor
      * @throws SQLException
      */
-    public void getChangesForTables(ChangeTable[] changeTables, Lsn intervalFromLsn, Lsn intervalToLsn, BlockingMultiResultSetConsumer consumer) throws SQLException, InterruptedException {
+    public void getChangesForTables(ChangeTable[] changeTables, Lsn intervalFromLsn, Lsn intervalToLsn, BlockingMultiResultSetConsumer consumer)
+            throws SQLException, InterruptedException {
         final String[] queries = new String[changeTables.length];
         final StatementPreparer[] preparers = new StatementPreparer[changeTables.length];
 
         int idx = 0;
-        for (ChangeTable changeTable: changeTables) {
+        for (ChangeTable changeTable : changeTables) {
             final String query = GET_ALL_CHANGES_FOR_TABLE.replace(STATEMENTS_PLACEHOLDER, changeTable.getCaptureInstance());
             queries[idx] = query;
             // If the table was added in the middle of queried buffer we need
@@ -208,7 +210,7 @@ public class SqlServerConnection extends JdbcConnection {
         return tableId.schema() + '_' + tableId.table();
     }
 
-    private <T> ResultSetMapper<T> singleResultMapper(ResultSetExtractor<T> extractor, String error) throws SQLException {
+    public <T> ResultSetMapper<T> singleResultMapper(ResultSetExtractor<T> extractor, String error) throws SQLException {
         return (rs) -> {
             if (rs.next()) {
                 final T ret = extractor.apply(rs);
@@ -234,9 +236,11 @@ public class SqlServerConnection extends JdbcConnection {
         public String getTableId() {
             return tableId;
         }
+
         public String getCaptureName() {
             return captureName;
         }
+
         public Lsn getFromLsn() {
             return fromLsn;
         }
@@ -254,9 +258,7 @@ public class SqlServerConnection extends JdbcConnection {
                                 rs.getString(3),
                                 rs.getInt(4),
                                 Lsn.valueOf(rs.getBytes(6)),
-                                Lsn.valueOf(rs.getBytes(7))
-                        )
-                );
+                                Lsn.valueOf(rs.getBytes(7))));
             }
             return changeTables;
         });
@@ -274,15 +276,13 @@ public class SqlServerConnection extends JdbcConnection {
                     final Set<ChangeTable> changeTables = new HashSet<>();
                     while (rs.next()) {
                         changeTables.add(new ChangeTable(
-                                            rs.getString(4),
-                                            rs.getInt(1),
-                                            Lsn.valueOf(rs.getBytes(5)),
-                                            Lsn.valueOf(rs.getBytes(6))
-                                        ));
+                                rs.getString(4),
+                                rs.getInt(1),
+                                Lsn.valueOf(rs.getBytes(5)),
+                                Lsn.valueOf(rs.getBytes(6))));
                     }
                     return changeTables;
-                }
-        );
+                });
     }
 
     public Table getTableSchemaFromTable(ChangeTable changeTable) throws SQLException {
@@ -293,14 +293,13 @@ public class SqlServerConnection extends JdbcConnection {
                 realDatabaseName,
                 changeTable.getSourceTableId().schema(),
                 changeTable.getSourceTableId().table(),
-                null)
-            ) {
+                null)) {
             while (rs.next()) {
                 readTableColumn(rs, changeTable.getSourceTableId(), null).ifPresent(ce -> columns.add(ce.create()));
             }
         }
 
-        final List<String> pkColumnNames = readPrimaryKeyNames(metadata, changeTable.getSourceTableId());
+        final List<String> pkColumnNames = readPrimaryKeyOrUniqueIndexNames(metadata, changeTable.getSourceTableId());
         Collections.sort(columns);
         return Table.editor()
                 .tableId(changeTable.getSourceTableId())
@@ -333,10 +332,10 @@ public class SqlServerConnection extends JdbcConnection {
         });
         Collections.sort(columns);
         return Table.editor()
-            .tableId(changeTable.getSourceTableId())
-            .addColumns(columns)
-            .setPrimaryKeyNames(pkColumnNames)
-            .create();
+                .tableId(changeTable.getSourceTableId())
+                .addColumns(columns)
+                .setPrimaryKeyNames(pkColumnNames)
+                .create();
     }
 
     public synchronized void rollback() throws SQLException {
@@ -353,12 +352,11 @@ public class SqlServerConnection extends JdbcConnection {
         return realDatabaseName;
     }
 
-    private  String retrieveRealDatabaseName() {
+    private String retrieveRealDatabaseName() {
         try {
             return queryAndMap(
                     GET_DATABASE_NAME,
-                    singleResultMapper(rs -> rs.getString(1), "Could not retrieve database name")
-            );
+                    singleResultMapper(rs -> rs.getString(1), "Could not retrieve database name"));
         }
         catch (SQLException e) {
             throw new RuntimeException("Couldn't obtain database name", e);

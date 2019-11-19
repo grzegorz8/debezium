@@ -13,11 +13,20 @@ package io.debezium.pipeline.metrics;
 public interface ChangeEventSourceMetricsMXBean {
 
     String getLastEvent();
+
     long getMilliSecondsSinceLastEvent();
+
     long getTotalNumberOfEventsSeen();
-    long getNumberOfEventsSkipped();
+
+    long getNumberOfEventsFiltered();
+
+    long getNumberOfErroneousEvents();
+
     String[] getMonitoredTables();
+
     int getQueueTotalCapacity();
+
     int getQueueRemainingCapacity();
+
     void reset();
 }

@@ -9,6 +9,7 @@ import static org.fest.assertions.Assertions.assertThat;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.sql.Connection;
 import java.sql.Time;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,6 +20,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAccessor;
 
 import org.apache.kafka.connect.data.Schema;
@@ -34,6 +36,7 @@ import io.debezium.embedded.AbstractConnectorTest;
 import io.debezium.jdbc.JdbcConnection;
 import io.debezium.jdbc.JdbcValueConverters;
 import io.debezium.jdbc.TemporalPrecisionMode;
+import io.debezium.relational.history.DatabaseHistory;
 import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
@@ -65,7 +68,8 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
     public void afterEach() {
         try {
             stopConnector();
-        } finally {
+        }
+        finally {
             Testing.Files.delete(DB_HISTORY_PATH);
         }
     }
@@ -74,7 +78,6 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
     public void unsignedTinyIntTest() throws InterruptedException {
         config = DATABASE.defaultConfig()
                 .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.INITIAL)
-                .with(MySqlConnectorConfig.DDL_PARSER_MODE, "antlr")
                 .build();
         start(MySqlConnector.class, config);
 
@@ -138,8 +141,8 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
     }
 
     private void assertEmptyFieldValue(SourceRecord record, String fieldName) {
-        final Struct envelope = (Struct)record.value();
-        final Struct after = (Struct)envelope.get("after");
+        final Struct envelope = (Struct) record.value();
+        final Struct after = (Struct) envelope.get("after");
         assertThat(after.getWithoutDefault(fieldName)).isNull();
     }
 
@@ -255,9 +258,7 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         SourceRecords records = consumeRecordsByTopic(EVENT_COUNT);
         SourceRecord record = records.recordsForTopic(DATABASE.topicForTable("UNSIGNED_BIGINT_TABLE")).get(0);
 
-        // TODO can't validate due to https://github.com/confluentinc/schema-registry/issues/833
-        // enable once that's resolved upstream
-        // validate(record);
+        validate(record);
 
         Schema schemaA = record.valueSchema().fields().get(1).schema().fields().get(0).schema();
         Schema schemaB = record.valueSchema().fields().get(1).schema().fields().get(1).schema();
@@ -341,9 +342,9 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         assertThat(schemaE.defaultValue()).isEqualTo(true);
         assertThat(schemaF.defaultValue()).isEqualTo(true);
         assertThat(schemaG.defaultValue()).isEqualTo(false);
-        assertThat(schemaH.defaultValue()).isEqualTo(new byte[] {66, 1});
+        assertThat(schemaH.defaultValue()).isEqualTo(new byte[]{ 66, 1 });
         assertThat(schemaI.defaultValue()).isEqualTo(null);
-        assertThat(schemaJ.defaultValue()).isEqualTo(new byte[] {15, 97, 1, 0});
+        assertThat(schemaJ.defaultValue()).isEqualTo(new byte[]{ 15, 97, 1, 0 });
         assertEmptyFieldValue(record, "K");
     }
 
@@ -390,12 +391,42 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         Schema schemaC = record.valueSchema().fields().get(1).schema().fields().get(2).schema();
         Schema schemaD = record.valueSchema().fields().get(1).schema().fields().get(3).schema();
         Schema schemaE = record.valueSchema().fields().get(1).schema().fields().get(4).schema();
+        Schema schemaG = record.valueSchema().fields().get(1).schema().fields().get(6).schema();
         assertThat(schemaA.defaultValue()).isEqualTo((short) 10);
         assertThat(schemaB.defaultValue()).isEqualTo((short) 5);
         assertThat(schemaC.defaultValue()).isEqualTo(0);
         assertThat(schemaD.defaultValue()).isEqualTo(20L);
         assertThat(schemaE.defaultValue()).isEqualTo(null);
         assertEmptyFieldValue(record, "F");
+        assertThat(schemaG.defaultValue()).isEqualTo((short) 1);
+    }
+
+    @Test
+    public void tinyIntBooleanTest() throws Exception {
+        config = DATABASE.defaultConfig()
+                .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.INITIAL)
+                .build();
+        start(MySqlConnector.class, config);
+
+        // Testing.Print.enable();
+
+        consumeRecordsByTopic(EVENT_COUNT);
+        try (final Connection conn = MySQLConnection.forTestDatabase(DATABASE.getDatabaseName()).connection()) {
+            conn.createStatement().execute("CREATE TABLE ti_boolean_table (" +
+                    "  A TINYINT(1) NOT NULL DEFAULT TRUE," +
+                    "  B TINYINT(2) NOT NULL DEFAULT FALSE" +
+                    ")");
+            conn.createStatement().execute("INSERT INTO ti_boolean_table VALUES (default, default)");
+        }
+
+        SourceRecords records = consumeRecordsByTopic(2);
+        SourceRecord record = records.recordsForTopic(DATABASE.topicForTable("ti_boolean_table")).get(0);
+        validate(record);
+
+        Schema schemaA = record.valueSchema().fields().get(1).schema().fields().get(0).schema();
+        Schema schemaB = record.valueSchema().fields().get(1).schema().fields().get(1).schema();
+        assertThat(schemaA.defaultValue()).isEqualTo((short) 1);
+        assertThat(schemaB.defaultValue()).isEqualTo((short) 0);
     }
 
     @Test
@@ -474,9 +505,7 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         SourceRecords records = consumeRecordsByTopic(EVENT_COUNT);
         SourceRecord record = records.recordsForTopic(DATABASE.topicForTable("NUMERIC_DECIMAL_TABLE")).get(0);
 
-        // TODO can't validate due to https://github.com/confluentinc/schema-registry/issues/833
-        // enable once that's resolved upstream
-        // validate(record);
+        validate(record);
 
         Schema schemaA = record.valueSchema().fields().get(1).schema().fields().get(0).schema();
         Schema schemaB = record.valueSchema().fields().get(1).schema().fields().get(1).schema();
@@ -490,6 +519,7 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         config = DATABASE.defaultConfig()
                 .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.INITIAL)
                 .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName("DATE_TIME_TABLE"))
+                .with(DatabaseHistory.STORE_ONLY_MONITORED_TABLES_DDL, true)
                 .build();
         start(MySqlConnector.class, config);
 
@@ -509,7 +539,9 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         Schema schemaH = record.valueSchema().fields().get(1).schema().fields().get(7).schema();
         Schema schemaI = record.valueSchema().fields().get(1).schema().fields().get(8).schema();
         Schema schemaJ = record.valueSchema().fields().get(1).schema().fields().get(9).schema();
-//         Number of days since epoch for date 1976-08-23
+        Schema schemaL = record.valueSchema().fields().get(1).schema().fields().get(11).schema();
+        Schema schemaM = record.valueSchema().fields().get(1).schema().fields().get(12).schema();
+        // Number of days since epoch for date 1976-08-23
         assertThat(schemaA.defaultValue()).isEqualTo(2426);
 
         String value1 = "1970-01-01 00:00:01";
@@ -518,15 +550,18 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         assertThat(schemaB.defaultValue()).isEqualTo(isoString);
 
         String value2 = "2018-01-03 00:00:10";
-        long toEpochMillis1 = Timestamp.toEpochMillis(LocalDateTime.from(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").parse(value2)), MySqlValueConverters::adjustTemporal);
+        long toEpochMillis1 = Timestamp.toEpochMillis(LocalDateTime.from(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").parse(value2)),
+                MySqlValueConverters::adjustTemporal);
         assertThat(schemaC.defaultValue()).isEqualTo(toEpochMillis1);
 
         String value3 = "2018-01-03 00:00:10.7";
-        long toEpochMillis2 = Timestamp.toEpochMillis(LocalDateTime.from(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.S").parse(value3)), MySqlValueConverters::adjustTemporal);
+        long toEpochMillis2 = Timestamp.toEpochMillis(LocalDateTime.from(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.S").parse(value3)),
+                MySqlValueConverters::adjustTemporal);
         assertThat(schemaD.defaultValue()).isEqualTo(toEpochMillis2);
 
         String value4 = "2018-01-03 00:00:10.123456";
-        long toEpochMicro = MicroTimestamp.toEpochMicros(LocalDateTime.from(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS").parse(value4)), MySqlValueConverters::adjustTemporal);
+        long toEpochMicro = MicroTimestamp.toEpochMicros(LocalDateTime.from(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS").parse(value4)),
+                MySqlValueConverters::adjustTemporal);
         assertThat(schemaE.defaultValue()).isEqualTo(toEpochMicro);
 
         assertThat(schemaF.defaultValue()).isEqualTo(2001);
@@ -534,74 +569,25 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         assertThat(schemaH.defaultValue()).isEqualTo(82800700000L);
         assertThat(schemaI.defaultValue()).isEqualTo(82800123456L);
 
-        //current timestamp will be replaced with epoch timestamp
+        assertThat(schemaL.defaultValue()).isEqualTo(Duration.ofHours(-23).minusMinutes(45).minusSeconds(56).minusMillis(700).toNanos() / 1_000);
+        assertThat(schemaM.defaultValue()).isEqualTo(Duration.ofHours(123).plus(123456, ChronoUnit.MICROS).toNanos() / 1_000);
+        // current timestamp will be replaced with epoch timestamp
         ZonedDateTime t5 = ZonedDateTime.ofInstant(Instant.EPOCH, ZoneOffset.UTC);
         String isoString5 = ZonedTimestamp.toIsoString(t5, ZoneOffset.UTC, MySqlValueConverters::adjustTemporal);
         assertThat(schemaJ.defaultValue()).isEqualTo(
                 MySQLConnection.forTestDatabase(DATABASE.getDatabaseName())
-                    .databaseAsserts()
-                    .currentDateTimeDefaultOptional(isoString5)
-        );
+                        .databaseAsserts()
+                        .currentDateTimeDefaultOptional(isoString5));
         assertEmptyFieldValue(record, "K");
     }
 
     @Test
-    public void timeTypeWithAdaptiveMode() throws InterruptedException {
-        config = DATABASE.defaultConfig()
-                .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.INITIAL)
-                .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName("DATE_TIME_TABLE"))
-                .with(MySqlConnectorConfig.TIME_PRECISION_MODE, TemporalPrecisionMode.ADAPTIVE)
-                .build();
-        start(MySqlConnector.class, config);
-
-        // Testing.Print.enable();
-
-        SourceRecords records = consumeRecordsByTopic(7);
-        final SourceRecord record = records.recordsForTopic(DATABASE.topicForTable("DATE_TIME_TABLE")).get(0);
-        validate(record);
-
-        Schema schemaA = record.valueSchema().fields().get(1).schema().fields().get(0).schema();
-        Schema schemaB = record.valueSchema().fields().get(1).schema().fields().get(1).schema();
-        Schema schemaC = record.valueSchema().fields().get(1).schema().fields().get(2).schema();
-        Schema schemaD = record.valueSchema().fields().get(1).schema().fields().get(3).schema();
-        Schema schemaE = record.valueSchema().fields().get(1).schema().fields().get(4).schema();
-        Schema schemaF = record.valueSchema().fields().get(1).schema().fields().get(5).schema();
-        Schema schemaG = record.valueSchema().fields().get(1).schema().fields().get(6).schema();
-        Schema schemaH = record.valueSchema().fields().get(1).schema().fields().get(7).schema();
-        Schema schemaI = record.valueSchema().fields().get(1).schema().fields().get(8).schema();
-
-        assertThat(schemaA.defaultValue()).isEqualTo(2426);
-
-        String value1 = "1970-01-01 00:00:01";
-        ZonedDateTime t = java.sql.Timestamp.valueOf(value1).toInstant().atZone(ZoneId.systemDefault());
-        String isoString = ZonedTimestamp.toIsoString(t, ZoneId.systemDefault(), MySqlValueConverters::adjustTemporal);
-        assertThat(schemaB.defaultValue()).isEqualTo(isoString);
-
-        String value2 = "2018-01-03 00:00:10";
-        long toEpochMillis1 = Timestamp.toEpochMillis(LocalDateTime.from(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").parse(value2)), MySqlValueConverters::adjustTemporal);
-        assertThat(schemaC.defaultValue()).isEqualTo(toEpochMillis1);
-
-        String value3 = "2018-01-03 00:00:10.7";
-        long toEpochMillis2 = Timestamp.toEpochMillis(LocalDateTime.from(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.S").parse(value3)), MySqlValueConverters::adjustTemporal);
-        assertThat(schemaD.defaultValue()).isEqualTo(toEpochMillis2);
-
-        String value4 = "2018-01-03 00:00:10.123456";
-        long toEpochMicro = MicroTimestamp.toEpochMicros(LocalDateTime.from(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS").parse(value4)), MySqlValueConverters::adjustTemporal);
-        assertThat(schemaE.defaultValue()).isEqualTo(toEpochMicro);
-
-        assertThat(schemaF.defaultValue()).isEqualTo(2001);
-        assertThat(schemaG.defaultValue()).isEqualTo(0);
-        assertThat(schemaH.defaultValue()).isEqualTo(82800700);
-        assertThat(schemaI.defaultValue()).isEqualTo(82800123456L);
-        assertEmptyFieldValue(record, "K");
-    }
-
-    @Test
-    public void timeTypeWithConnectMode() throws InterruptedException {
+    public void timeTypeWithConnectMode() throws Exception {
         config = DATABASE.defaultConfig()
                 .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.INITIAL)
                 .with(MySqlConnectorConfig.TABLE_WHITELIST, DATABASE.qualifiedTableName("DATE_TIME_TABLE"))
                 .with(MySqlConnectorConfig.TIME_PRECISION_MODE, TemporalPrecisionMode.CONNECT)
+                .with(DatabaseHistory.STORE_ONLY_MONITORED_TABLES_DDL, true)
                 .build();
         start(MySqlConnector.class, config);
 
@@ -610,9 +596,7 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         SourceRecords records = consumeRecordsByTopic(7);
         final SourceRecord record = records.recordsForTopic(DATABASE.topicForTable("DATE_TIME_TABLE")).get(0);
 
-        // TODO can't validate due to https://github.com/confluentinc/schema-registry/issues/833
-        // enable once that's resolved upstream
-        // validate(record);
+        validate(record);
 
         Schema schemaA = record.valueSchema().fields().get(1).schema().fields().get(0).schema();
         Schema schemaB = record.valueSchema().fields().get(1).schema().fields().get(1).schema();
@@ -650,10 +634,10 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         assertThat(schemaG.defaultValue()).isEqualTo(date);
 
         Duration duration1 = Duration.between(LocalTime.MIN, LocalTime.from(DateTimeFormatter.ofPattern("HH:mm:ss.S").parse("23:00:00.7")));
-        assertThat(schemaH.defaultValue()).isEqualTo(new java.util.Date(io.debezium.time.Time.toMilliOfDay(duration1, MySqlValueConverters::adjustTemporal)));
+        assertThat(schemaH.defaultValue()).isEqualTo(new java.util.Date(io.debezium.time.Time.toMilliOfDay(duration1, false)));
 
         Duration duration2 = Duration.between(LocalTime.MIN, LocalTime.from(DateTimeFormatter.ofPattern("HH:mm:ss.SSSSSS").parse("23:00:00.123456")));
-        assertThat(schemaI.defaultValue()).isEqualTo(new java.util.Date(io.debezium.time.Time.toMilliOfDay(duration2, MySqlValueConverters::adjustTemporal)));
+        assertThat(schemaI.defaultValue()).isEqualTo(new java.util.Date(io.debezium.time.Time.toMilliOfDay(duration2, false)));
         assertEmptyFieldValue(record, "K");
     }
 
@@ -697,7 +681,7 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
     }
 
     @Test
-    @FixFor("DBZ-771")
+    @FixFor({ "DBZ-771", "DBZ-1321" })
     public void columnTypeChangeResetsDefaultValue() throws Exception {
         config = DATABASE.defaultConfig()
                 .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.INITIAL)
@@ -722,11 +706,14 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
 
                 connection.execute("alter table DBZ_771_CUSTOMERS change customer_type customer_type int;");
                 connection.execute("insert into DBZ_771_CUSTOMERS (id, customer_type) values (2, 456);");
+
+                connection.execute("alter table DBZ_771_CUSTOMERS modify customer_type int null;");
+                connection.execute("alter table DBZ_771_CUSTOMERS modify customer_type int not null;");
             }
         }
 
         // consume the records for the two executed statements
-        records = consumeRecordsByTopic(2);
+        records = consumeRecordsByTopic(4);
 
         record = records.recordsForTopic(DATABASE.topicForTable("DBZ_771_CUSTOMERS")).get(0);
         validate(record);
@@ -740,7 +727,6 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
     public void generatedValueTest() throws InterruptedException {
         config = DATABASE.defaultConfig()
                 .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.INITIAL)
-                .with(MySqlConnectorConfig.DDL_PARSER_MODE, "antlr")
                 .build();
         start(MySqlConnector.class, config);
 
@@ -751,9 +737,9 @@ public class MysqlDefaultValueIT extends AbstractConnectorTest {
         validate(record);
 
         Schema schemaB = record.valueSchema().fields().get(1).schema().fields().get(1).schema();
-        Integer recordB = ((Struct)record.value()).getStruct("after").getInt32("B");
+        Integer recordB = ((Struct) record.value()).getStruct("after").getInt32("B");
         Schema schemaC = record.valueSchema().fields().get(1).schema().fields().get(2).schema();
-        Integer recordC = ((Struct)record.value()).getStruct("after").getInt32("C");
+        Integer recordC = ((Struct) record.value()).getStruct("after").getInt32("C");
 
         // Calculated default value is reported as null in schema
         assertThat(schemaB.isOptional()).isEqualTo(true);

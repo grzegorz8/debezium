@@ -36,7 +36,7 @@ public class MySqlSourceTypeInSchemaIT extends AbstractConnectorTest {
     private static final String TYPE_SCALE_PARAMETER_KEY = "__debezium.source.column.scale";
 
     private static final Path DB_HISTORY_PATH = Testing.Files.createTestingPath("file-db-history-schema-parameter.txt")
-                                                             .toAbsolutePath();
+            .toAbsolutePath();
     private final UniqueDatabase DATABASE = new UniqueDatabase("schemaparameterit", "source_type_as_schema_parameter_test")
             .withDbHistoryPath(DB_HISTORY_PATH);
 
@@ -61,12 +61,12 @@ public class MySqlSourceTypeInSchemaIT extends AbstractConnectorTest {
     }
 
     @Test
-    @FixFor("DBZ-644")
+    @FixFor({ "DBZ-644", "DBZ-1222" })
     public void shouldPropagateSourceTypeAsSchemaParameter() throws SQLException, InterruptedException {
         // Use the DB configuration to define the connector's configuration ...
         config = DATABASE.defaultConfig()
                 .with(MySqlConnectorConfig.SNAPSHOT_MODE, MySqlConnectorConfig.SnapshotMode.NEVER)
-                .with("column.propagate.source.type", ".*c1,.*c2,.*c3.*")
+                .with("column.propagate.source.type", ".*c1,.*c2,.*c3.*,.*f.")
                 .build();
 
         // Start the connector ...
@@ -75,7 +75,7 @@ public class MySqlSourceTypeInSchemaIT extends AbstractConnectorTest {
         // ---------------------------------------------------------------------------------------------------------------
         // Consume all of the events due to startup and initialization of the database
         // ---------------------------------------------------------------------------------------------------------------
-        //Testing.Debug.enable();
+        // Testing.Debug.enable();
         int numCreateDatabase = 1;
         int numCreateTables = 1;
         int numInserts = 1;
@@ -136,5 +136,24 @@ public class MySqlSourceTypeInSchemaIT extends AbstractConnectorTest {
 
         assertThat(c3bSchemaParameters).includes(
                 entry(TYPE_NAME_PARAMETER_KEY, "VARCHAR"), entry(TYPE_LENGTH_PARAMETER_KEY, "128"));
+
+        // float info
+        Map<String, String> f1SchemaParameters = before
+                .schema()
+                .field("f1")
+                .schema()
+                .parameters();
+
+        assertThat(f1SchemaParameters).includes(
+                entry(TYPE_NAME_PARAMETER_KEY, "FLOAT"), entry(TYPE_LENGTH_PARAMETER_KEY, "10"));
+
+        Map<String, String> f2SchemaParameters = before
+                .schema()
+                .field("f2")
+                .schema()
+                .parameters();
+
+        assertThat(f2SchemaParameters).includes(
+                entry(TYPE_NAME_PARAMETER_KEY, "FLOAT"), entry(TYPE_LENGTH_PARAMETER_KEY, "8"), entry(TYPE_SCALE_PARAMETER_KEY, "4"));
     }
 }
