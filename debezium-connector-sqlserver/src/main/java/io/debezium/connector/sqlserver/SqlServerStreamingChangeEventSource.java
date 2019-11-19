@@ -5,7 +5,6 @@
  */
 package io.debezium.connector.sqlserver;
 
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -20,6 +19,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import io.debezium.relational.Table;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,11 +53,6 @@ import io.debezium.util.Metronome;
  * @author Jiri Pechanec
  */
 public class SqlServerStreamingChangeEventSource implements StreamingChangeEventSource {
-
-    private static final int COL_COMMIT_LSN = 1;
-    private static final int COL_ROW_LSN = 2;
-    private static final int COL_OPERATION = 3;
-    private static final int COL_DATA = 5;
 
     private static final Pattern MISSING_CDC_FUNCTION_CHANGES_ERROR = Pattern.compile("Invalid object name 'cdc.fn_cdc_get_all_changes_(.*)'\\.");
 
@@ -265,12 +260,6 @@ public class SqlServerStreamingChangeEventSource implements StreamingChangeEvent
         LOGGER.info("Migrating schema to {}", newTable);
         dispatcher.dispatchSchemaChangeEvent(newTable.getSourceTableId(),
                 new SqlServerSchemaChangeEventEmitter(offsetContext, newTable, metadataConnection.getTableSchemaFromTable(newTable), SchemaChangeEventType.ALTER));
-        // TODO MELLO
-        /*
-         * Table tableSchema = connection.getTableSchemaFromTable(newTable);
-         * dispatcher.dispatchSchemaChangeEvent(newTable.getSourceTableId(), new SqlServerSchemaChangeEventEmitter(offsetContext, newTable, tableSchema, SchemaChangeEventType.ALTER));
-         * newTable.setSourceTable(tableSchema);
-         */
     }
 
     private ChangeTable[] processErrorFromChangeTableQuery(SQLException exception, ChangeTable[] currentChangeTables) throws Exception {

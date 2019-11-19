@@ -29,6 +29,7 @@ import io.debezium.relational.RelationalDatabaseConnectorConfig;
 import io.debezium.relational.history.FileDatabaseHistory;
 import io.debezium.util.Clock;
 import io.debezium.util.IoUtil;
+import io.debezium.util.Strings;
 import io.debezium.util.Metronome;
 import io.debezium.util.Strings;
 import io.debezium.util.Testing;
